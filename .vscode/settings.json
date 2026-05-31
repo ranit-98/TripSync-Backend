@@ -1,0 +1,9 @@
+{
+  "eslint.runtime": "/home/dell/.nvm/versions/node/v22.21.1/bin/node",
+  "eslint.workingDirectories": [
+    {
+      "mode": "auto"
+    }
+  ],
+  "typescript.tsdk": "node_modules/typescript/lib"
+}

@@ -1,0 +1,30 @@
+PORT=4000
+NODE_ENV=development
+FRONTEND_URL=http://localhost:3000
+
+# PostgreSQL
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/trip_sync?schema=public
+DB_HOST=localhost
+DB_PORT=5432
+DB_USERNAME=postgres
+DB_PASSWORD=postgres
+DB_DATABASE=trip_sync
+DB_SSL=false
+DB_SSL_REJECT_UNAUTHORIZED=false
+
+# JWT secrets must be long random strings in production.
+JWT_ACCESS_SECRET=replace-with-a-long-access-secret
+JWT_REFRESH_SECRET=replace-with-a-long-refresh-secret
+JWT_ACCESS_TTL=15m
+JWT_REFRESH_TTL=7d
+
+# Cookies are set by the backend as HttpOnly + Secure + SameSite=None.
+ACCESS_TOKEN_COOKIE=trip_sync_access
+REFRESH_TOKEN_COOKIE=trip_sync_refresh
+COOKIE_DOMAIN=
+
+# Cloudinary direct-upload signing.
+CLOUDINARY_CLOUD_NAME=
+CLOUDINARY_API_KEY=
+CLOUDINARY_API_SECRET=
+CLOUDINARY_FOLDER=trip-sync
