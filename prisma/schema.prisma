@@ -10,16 +10,29 @@ datasource db {
 enum UserRole {
   user
   admin
+
+  @@map("users_role_enum")
 }
 
 enum TripStatus {
   active
   archived
+
+  @@map("trips_status_enum")
 }
 
 enum TripMemberRole {
   collaborator
   viewer
+
+  @@map("trip_members_role_enum")
+}
+
+enum TripInviteRole {
+  collaborator
+  viewer
+
+  @@map("trip_invites_role_enum")
 }
 
 enum InviteStatus {
@@ -27,11 +40,15 @@ enum InviteStatus {
   accepted
   declined
   expired
+
+  @@map("trip_invites_status_enum")
 }
 
 enum SettlementStatus {
   pending
   paid
+
+  @@map("settlements_status_enum")
 }
 
 model User {
@@ -111,7 +128,7 @@ model TripInvite {
   tripId    String         @map("trip_id") @db.Uuid
   trip      Trip           @relation(fields: [tripId], references: [id], onDelete: Cascade)
   email     String
-  role      TripMemberRole
+  role      TripInviteRole
   status    InviteStatus   @default(pending)
   invitedBy String         @map("invited_by") @db.Uuid
   inviter   User           @relation("InviteSender", fields: [invitedBy], references: [id])
