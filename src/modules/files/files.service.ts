@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { MESSAGES } from '../../common/constants/messages.constants';
-import { PrismaService } from '../../database/prisma.service';
+import { Document, DocumentFolder } from '../../database/schemas';
 import {
   CreateDocumentDto,
   CreateFolderDto,
@@ -10,37 +12,37 @@ import {
 
 @Injectable()
 export class FilesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    @InjectModel(DocumentFolder.name)
+    private readonly folders: Model<DocumentFolder>,
+    @InjectModel(Document.name) private readonly documents: Model<Document>,
+  ) {}
 
   foldersForTrip(tripId: string) {
-    return this.prisma.documentFolder.findMany({
-      where: { tripId },
-      orderBy: { createdAt: 'desc' },
-    });
+    return this.folders.find({ tripId }).sort({ createdAt: -1 }).lean().exec();
   }
 
   createFolder(tripId: string, userId: string, dto: CreateFolderDto) {
-    return this.prisma.documentFolder.create({
-      data: { ...dto, tripId, createdBy: userId },
-    });
+    return this.folders.create({ ...dto, tripId, createdBy: userId });
   }
 
   updateFolder(folderId: string, dto: UpdateFolderDto) {
-    return this.prisma.documentFolder.update({
-      where: { id: folderId },
-      data: dto,
-    });
+    return this.folders
+      .findOneAndUpdate({ id: folderId }, dto, { new: true })
+      .exec();
   }
 
   async deleteFolder(folderId: string) {
-    await this.prisma.documentFolder.delete({ where: { id: folderId } });
+    await this.folders.deleteOne({ id: folderId }).exec();
+    await this.documents.deleteMany({ folderId }).exec();
   }
 
   documentsForFolder(folderId: string) {
-    return this.prisma.document.findMany({
-      where: { folderId },
-      orderBy: { createdAt: 'desc' },
-    });
+    return this.documents
+      .find({ folderId })
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec();
   }
 
   createDocument(
@@ -49,27 +51,30 @@ export class FilesService {
     userId: string,
     dto: CreateDocumentDto,
   ) {
-    return this.prisma.document.create({
-      data: { ...dto, tripId, folderId, uploadedBy: userId },
+    return this.documents.create({
+      ...dto,
+      tripId,
+      folderId,
+      uploadedBy: userId,
     });
   }
 
   async document(documentId: string) {
-    const document = await this.prisma.document.findUnique({
-      where: { id: documentId },
-    });
+    const document = await this.documents
+      .findOne({ id: documentId })
+      .lean()
+      .exec();
     if (!document) throw new NotFoundException(MESSAGES.COMMON.NOT_FOUND);
     return document;
   }
 
   updateDocument(documentId: string, dto: UpdateDocumentDto) {
-    return this.prisma.document.update({
-      where: { id: documentId },
-      data: dto,
-    });
+    return this.documents
+      .findOneAndUpdate({ id: documentId }, dto, { new: true })
+      .exec();
   }
 
   async deleteDocument(documentId: string) {
-    await this.prisma.document.delete({ where: { id: documentId } });
+    await this.documents.deleteOne({ id: documentId }).exec();
   }
 }

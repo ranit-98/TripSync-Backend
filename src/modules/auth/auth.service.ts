@@ -4,11 +4,12 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { User } from '@prisma/client';
+import { InjectModel } from '@nestjs/mongoose';
 import * as bcrypt from 'bcrypt';
+import { Model } from 'mongoose';
 import { MESSAGES } from '../../common/constants/messages.constants';
 import type { RequestUser } from '../../common/types/request-user.type';
-import { PrismaService } from '../../database/prisma.service';
+import { User, type UserDocument } from '../../database/schemas';
 import { LoginDto, RegisterDto } from './dto/auth.dto';
 
 const timeUnitsInSeconds = {
@@ -36,47 +37,43 @@ function tokenTtlSeconds(value: string | undefined, fallbackSeconds: number) {
 @Injectable()
 export class AuthService {
   constructor(
-    private readonly prisma: PrismaService,
+    @InjectModel(User.name) private readonly users: Model<User>,
     private readonly jwt: JwtService,
   ) {}
 
   async register(dto: RegisterDto) {
     const email = dto.email.toLowerCase();
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email },
-    });
+    const existingUser = await this.users.exists({ email }).exec();
     if (existingUser) {
       throw new ConflictException(MESSAGES.AUTH.EMAIL_EXISTS);
     }
 
-    const user = await this.prisma.user.create({
-      data: {
-        name: dto.name,
-        email,
-        passwordHash: await bcrypt.hash(dto.password, 12),
-      },
+    const user = await this.users.create({
+      name: dto.name,
+      email,
+      passwordHash: await bcrypt.hash(dto.password, 12),
     });
 
     const tokens = await this.issueTokens(user);
-    await this.persistRefreshToken(user.id, tokens.refreshToken);
+    await this.persistRefreshToken(String(user.id), tokens.refreshToken);
     return { user: this.toProfile(user), ...tokens };
   }
 
   async login(dto: LoginDto) {
-    const user = await this.prisma.user.findUnique({
-      where: { email: dto.email.toLowerCase() },
-    });
+    const user = await this.users
+      .findOne({ email: dto.email.toLowerCase() })
+      .exec();
     if (!user || !(await bcrypt.compare(dto.password, user.passwordHash))) {
       throw new UnauthorizedException(MESSAGES.AUTH.INVALID_CREDENTIALS);
     }
 
     const tokens = await this.issueTokens(user);
-    await this.persistRefreshToken(user.id, tokens.refreshToken);
+    await this.persistRefreshToken(String(user.id), tokens.refreshToken);
     return { user: this.toProfile(user), ...tokens };
   }
 
   async refresh(userId: string, refreshToken: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    const user = await this.users.findOne({ id: userId }).exec();
     if (
       !user?.refreshTokenHash ||
       !(await bcrypt.compare(refreshToken, user.refreshTokenHash))
@@ -85,7 +82,7 @@ export class AuthService {
     }
 
     const tokens = await this.issueTokens(user);
-    await this.persistRefreshToken(user.id, tokens.refreshToken);
+    await this.persistRefreshToken(String(user.id), tokens.refreshToken);
     return { user: this.toProfile(user), ...tokens };
   }
 
@@ -96,13 +93,12 @@ export class AuthService {
   }
 
   async logout(userId: string) {
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { refreshTokenHash: null },
-    });
+    await this.users
+      .updateOne({ id: userId }, { refreshTokenHash: null })
+      .exec();
   }
 
-  private async issueTokens(user: User) {
+  private async issueTokens(user: User | UserDocument) {
     const payload: RequestUser = {
       id: user.id,
       email: user.email,
@@ -127,15 +123,15 @@ export class AuthService {
   }
 
   private async persistRefreshToken(userId: string, token: string) {
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        refreshTokenHash: await bcrypt.hash(token, 12),
-      },
-    });
+    await this.users
+      .updateOne(
+        { id: userId },
+        { refreshTokenHash: await bcrypt.hash(token, 12) },
+      )
+      .exec();
   }
 
-  toProfile(user: User) {
+  toProfile(user: User | UserDocument) {
     return {
       id: user.id,
       name: user.name,

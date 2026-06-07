@@ -10,6 +10,7 @@ export const MESSAGES = {
   USERS: {
     PROFILE: 'Profile fetched successfully',
     UPDATED: 'Profile updated successfully',
+    AVATAR_UPDATED: 'Avatar updated successfully',
     PASSWORD_UPDATED: 'Password updated successfully',
   },
   TRIPS: {

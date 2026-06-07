@@ -6,9 +6,14 @@ import {
   Param,
   Patch,
   Post,
+  ParseFilePipeBuilder,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiBody } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBody, ApiConsumes } from '@nestjs/swagger';
+import { memoryStorage } from 'multer';
 import { MESSAGES } from '../../common/constants/messages.constants';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { TripRoles } from '../../common/decorators/trip-roles.decorator';
@@ -16,6 +21,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { TripMemberGuard } from '../../common/guards/trip-member.guard';
 import type { RequestUser } from '../../common/types/request-user.type';
 import { TRIP_MEMBER_ROLES } from '../../common/constants/roles.constants';
+import { MAX_IMAGE_BYTES } from '../uploads/uploads.service';
 import { CreatePhotoDto, UpdatePhotoDto } from './dto/gallery.dto';
 import { GalleryService } from './gallery.service';
 
@@ -53,15 +59,29 @@ export class GalleryController {
   @Post('trips/:tripId/photos')
   @UseGuards(TripMemberGuard)
   @TripRoles(TRIP_MEMBER_ROLES.COLLABORATOR)
+  @UseInterceptors(
+    FileInterceptor('image', {
+      storage: memoryStorage(),
+      limits: { fileSize: MAX_IMAGE_BYTES, files: 1 },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
   @ApiBody({ type: CreatePhotoDto })
   async create(
     @Param('tripId') tripId: string,
     @CurrentUser() user: RequestUser,
     @Body() dto: CreatePhotoDto,
+    @UploadedFile(
+      new ParseFilePipeBuilder()
+        .addFileTypeValidator({ fileType: /(jpeg|jpg|png|webp|gif)$/ })
+        .addMaxSizeValidator({ maxSize: MAX_IMAGE_BYTES })
+        .build({ fileIsRequired: true }),
+    )
+    image: Express.Multer.File,
   ) {
     return {
       message: MESSAGES.GALLERY.CREATED,
-      data: await this.gallery.create(tripId, user.id, dto),
+      data: await this.gallery.create(tripId, user.id, dto, image),
     };
   }
 

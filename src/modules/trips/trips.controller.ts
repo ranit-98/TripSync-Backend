@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -6,9 +7,13 @@ import {
   Param,
   Patch,
   Post,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiBody } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBody, ApiConsumes } from '@nestjs/swagger';
+import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { TripRoles } from '../../common/decorators/trip-roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -17,6 +22,7 @@ import { TripOwnerOrAdminGuard } from '../../common/guards/trip-owner-or-admin.g
 import { MESSAGES } from '../../common/constants/messages.constants';
 import type { RequestUser } from '../../common/types/request-user.type';
 import { TRIP_MEMBER_ROLES } from '../../common/constants/roles.constants';
+import { MAX_IMAGE_BYTES, UploadsService } from '../uploads/uploads.service';
 import {
   CreateTripDto,
   InviteMemberDto,
@@ -29,7 +35,10 @@ import { TripsService } from './trips.service';
 @Controller()
 @UseGuards(JwtAuthGuard)
 export class TripsController {
-  constructor(private readonly trips: TripsService) {}
+  constructor(
+    private readonly trips: TripsService,
+    private readonly uploads: UploadsService,
+  ) {}
 
   @Get('trips')
   async list(@CurrentUser() user: RequestUser) {
@@ -40,11 +49,61 @@ export class TripsController {
   }
 
   @Post('trips')
-  @ApiBody({ type: CreateTripDto })
-  async create(@CurrentUser() user: RequestUser, @Body() dto: CreateTripDto) {
+  @UseInterceptors(
+    FileInterceptor('cover', {
+      storage: memoryStorage(),
+      limits: { fileSize: MAX_IMAGE_BYTES, files: 1 },
+    }),
+  )
+  @ApiConsumes('multipart/form-data', 'application/json')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', example: 'Goa Friends Trip' },
+        destination: { type: 'string', example: 'Goa, India' },
+        startDate: { type: 'string', format: 'date', example: '2026-08-12' },
+        endDate: { type: 'string', format: 'date', example: '2026-08-18' },
+        currency: { type: 'string', example: 'INR' },
+        budget: { type: 'number', example: 50000 },
+        cover: { type: 'string', format: 'binary' },
+        coverUrl: {
+          type: 'string',
+          example: 'https://res.cloudinary.com/demo/image/upload/goa-cover.jpg',
+        },
+        styles: {
+          oneOf: [
+            { type: 'array', items: { type: 'string' } },
+            { type: 'string', example: '["beach","food"]' },
+          ],
+        },
+        inviteEmail: { type: 'string', example: 'friend@example.com' },
+        inviteRole: {
+          type: 'string',
+          enum: Object.values(TRIP_MEMBER_ROLES),
+          example: TRIP_MEMBER_ROLES.VIEWER,
+        },
+        inviteNotes: {
+          type: 'string',
+          example: 'Can you help with hotel planning?',
+        },
+      },
+      required: ['title', 'destination', 'startDate', 'endDate'],
+    },
+  })
+  async create(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: CreateTripDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    const coverUrl =
+      file !== undefined
+        ? await this.uploads.uploadImage(file, `trips/covers`)
+        : dto.coverUrl;
+
     return {
       message: MESSAGES.TRIPS.CREATED,
-      data: await this.trips.create(user.id, dto),
+      data: await this.trips.create(user.id, { ...dto, coverUrl }),
     };
   }
 
@@ -78,14 +137,42 @@ export class TripsController {
   @Post('trips/:tripId/cover')
   @UseGuards(TripMemberGuard)
   @TripRoles(TRIP_MEMBER_ROLES.COLLABORATOR)
-  @ApiBody({ type: UploadCoverDto })
+  @UseInterceptors(
+    FileInterceptor('cover', {
+      storage: memoryStorage(),
+      limits: { fileSize: MAX_IMAGE_BYTES, files: 1 },
+    }),
+  )
+  @ApiConsumes('multipart/form-data', 'application/json')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        cover: { type: 'string', format: 'binary' },
+        coverUrl: {
+          type: 'string',
+          example: 'https://res.cloudinary.com/demo/image/upload/goa-cover.jpg',
+        },
+      },
+    },
+  })
   async uploadCover(
     @Param('tripId') tripId: string,
     @Body() dto: UploadCoverDto,
+    @UploadedFile() file?: Express.Multer.File,
   ) {
+    const coverUrl =
+      file !== undefined
+        ? await this.uploads.uploadImage(file, `trips/${tripId}/cover`)
+        : dto.coverUrl;
+
+    if (!coverUrl) {
+      throw new BadRequestException('Cover image or coverUrl is required.');
+    }
+
     return {
       message: MESSAGES.TRIPS.COVER_UPDATED,
-      data: await this.trips.update(tripId, { coverUrl: dto.coverUrl }),
+      data: await this.trips.update(tripId, { coverUrl }),
     };
   }
 

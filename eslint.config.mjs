@@ -34,8 +34,7 @@ export default tseslint.config(
   },
   {
     files: [
-      'src/database/prisma.service.ts',
-      'src/database/queries/**/*.ts',
+      'src/database/**/*.ts',
       'src/common/guards/**/*.ts',
       'src/modules/**/*.service.ts',
     ],

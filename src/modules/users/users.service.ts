@@ -3,18 +3,19 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { User } from '@prisma/client';
+import { InjectModel } from '@nestjs/mongoose';
 import * as bcrypt from 'bcrypt';
+import { Model } from 'mongoose';
 import { MESSAGES } from '../../common/constants/messages.constants';
-import { PrismaService } from '../../database/prisma.service';
+import { User, type UserDocument } from '../../database/schemas';
 import { ChangePasswordDto, UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@InjectModel(User.name) private readonly users: Model<User>) {}
 
   async findProfile(userId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    const user = await this.users.findOne({ id: userId }).exec();
     if (!user) {
       throw new NotFoundException(MESSAGES.COMMON.NOT_FOUND);
     }
@@ -22,28 +23,30 @@ export class UsersService {
   }
 
   async updateProfile(userId: string, dto: UpdateUserDto) {
-    await this.prisma.user.update({ where: { id: userId }, data: dto });
+    await this.users.updateOne({ id: userId }, dto).exec();
     return this.findProfile(userId);
   }
 
   async changePassword(userId: string, dto: ChangePasswordDto) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    const user = await this.users.findOne({ id: userId }).exec();
     if (
       !user ||
       !(await bcrypt.compare(dto.currentPassword, user.passwordHash))
     ) {
       throw new UnauthorizedException(MESSAGES.AUTH.INVALID_CREDENTIALS);
     }
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        passwordHash: await bcrypt.hash(dto.newPassword, 12),
-        refreshTokenHash: null,
-      },
-    });
+    await this.users
+      .updateOne(
+        { id: userId },
+        {
+          passwordHash: await bcrypt.hash(dto.newPassword, 12),
+          refreshTokenHash: null,
+        },
+      )
+      .exec();
   }
 
-  private toProfile(user: User) {
+  private toProfile(user: User | UserDocument) {
     return {
       id: user.id,
       name: user.name,

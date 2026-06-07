@@ -5,23 +5,23 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { PrismaService } from '../../database/prisma.service';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import { Trip } from '../../database/schemas';
 import { MESSAGES } from '../constants/messages.constants';
 import { USER_ROLES } from '../constants/roles.constants';
 import { RequestUser } from '../types/request-user.type';
 
 @Injectable()
 export class TripOwnerOrAdminGuard implements CanActivate {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@InjectModel(Trip.name) private readonly trips: Model<Trip>) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<{
       params: Record<string, string>;
       user: RequestUser;
     }>();
-    const trip = await this.prisma.trip.findUnique({
-      where: { id: request.params.tripId },
-    });
+    const trip = await this.trips.findOne({ id: request.params.tripId }).exec();
 
     if (!trip) {
       throw new NotFoundException(MESSAGES.COMMON.NOT_FOUND);

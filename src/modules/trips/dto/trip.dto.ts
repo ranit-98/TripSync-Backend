@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform, Type } from 'class-transformer';
 import {
   TRIP_MEMBER_ROLES,
   type TripMemberRole,
@@ -15,6 +16,31 @@ import {
   IsUrl,
   Min,
 } from 'class-validator';
+
+const toStringArray = ({ value }: { value: unknown }) => {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  try {
+    const parsedValue: unknown = JSON.parse(value);
+
+    if (Array.isArray(parsedValue)) {
+      return parsedValue;
+    }
+  } catch {
+    return value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return value;
+};
 
 export class CreateTripDto {
   @ApiProperty({ example: 'Goa Friends Trip' })
@@ -40,6 +66,7 @@ export class CreateTripDto {
 
   @ApiPropertyOptional({ minimum: 0, example: 50000 })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   budget?: number;
@@ -51,12 +78,17 @@ export class CreateTripDto {
   @IsUrl()
   coverUrl?: string;
 
+  @ApiPropertyOptional({ type: 'string', format: 'binary' })
+  @IsOptional()
+  cover?: unknown;
+
   @ApiPropertyOptional({
     type: [String],
     maxItems: 12,
     example: ['beach', 'food', 'nightlife'],
   })
   @IsOptional()
+  @Transform(toStringArray)
   @IsArray()
   @ArrayMaxSize(12)
   @IsString({ each: true })
@@ -109,6 +141,7 @@ export class UpdateTripDto {
 
   @ApiPropertyOptional({ minimum: 0, example: 55000 })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   budget?: number;
@@ -122,6 +155,7 @@ export class UpdateTripDto {
 
   @ApiPropertyOptional({ type: [String], example: ['beach', 'relax'] })
   @IsOptional()
+  @Transform(toStringArray)
   @IsArray()
   @IsString({ each: true })
   styles?: string[];
@@ -152,9 +186,14 @@ export class UpdateMemberDto {
 }
 
 export class UploadCoverDto {
-  @ApiProperty({
+  @ApiPropertyOptional({ type: 'string', format: 'binary' })
+  @IsOptional()
+  cover?: unknown;
+
+  @ApiPropertyOptional({
     example: 'https://res.cloudinary.com/demo/image/upload/goa-cover.jpg',
   })
+  @IsOptional()
   @IsUrl()
-  coverUrl: string;
+  coverUrl?: string;
 }

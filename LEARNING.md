@@ -43,8 +43,8 @@ basics of these topics:
 
 - TypeScript: types, classes, async/await, imports and exports.
 - NestJS: modules, controllers, services, guards, decorators, pipes.
-- Prisma: schema models, relations, migrations, Prisma Client queries.
-- PostgreSQL: tables, foreign keys, one-to-many and many-to-many relations.
+- MongoDB: collections, document shape, indexes, and references by id.
+- Mongoose: schemas, models, validation rules, and query helpers.
 - Authentication: password hashing, JWT access tokens, refresh tokens, cookies.
 - REST APIs: HTTP methods, status codes, request body, params, responses.
 
@@ -90,8 +90,7 @@ src/main.ts              app startup
 src/app.module.ts        root module
 src/modules/*            feature modules
 src/common/*             shared guards, decorators, constants
-src/database/*           Prisma connection
-prisma/schema.prisma     database design
+src/database/*           MongoDB connection and Mongoose schemas
 ```
 
 Start with a small NestJS app that returns one health message.
@@ -101,16 +100,16 @@ Start with a small NestJS app that returns one health message.
 Add environment variables for:
 
 - `PORT`
-- `DATABASE_URL`
+- `MONGODB_URI`
 - `FRONTEND_URL`
 - JWT secrets
 - cookie names
 
 Do not hardcode secrets inside services. Use config or environment variables.
 
-### Step 3: Add Prisma And PostgreSQL
+### Step 3: Add MongoDB And Mongoose
 
-Start with only the `User` model.
+Start with only the `User` schema.
 
 Then add:
 
@@ -118,20 +117,13 @@ Then add:
 - `TripMember`
 - `TripInvite`
 
-Do not create all models at once if you are learning. Too many relations at the
-start will make debugging painful.
+Do not create all schemas at once if you are learning. Too many references at
+the start will make debugging painful.
 
-After changing the Prisma schema, run:
-
-```bash
-yarn prisma:generate
-yarn prisma:migrate
-```
-
-Use Prisma Studio to inspect your data:
+Use `mongosh` or MongoDB Compass to inspect your data:
 
 ```bash
-yarn prisma:studio
+mongosh mongodb://localhost:27017/trip_sync
 ```
 
 ### Step 4: Build Auth
@@ -223,7 +215,7 @@ After trips and permissions work, add modules slowly:
 For each module, follow the same pattern:
 
 ```text
-DTO -> controller -> service -> Prisma query -> response
+DTO -> controller -> service -> Mongoose query -> response
 ```
 
 Example thinking for expenses:
@@ -233,7 +225,8 @@ Example thinking for expenses:
 - It has splits.
 - Only trip collaborators can create expenses.
 - Viewers can read expenses.
-- Amounts should use decimal-safe database types.
+- Amounts should be stored consistently as numbers or decimal types, depending
+  on the precision your product needs.
 
 ## 5. What Not To Do
 
@@ -254,10 +247,10 @@ Avoid these mistakes:
 
 Read the project in this order:
 
-1. `prisma/schema.prisma`
+1. `src/database/schemas/*.schema.ts`
 2. `src/main.ts`
 3. `src/app.module.ts`
-4. `src/database/prisma.service.ts`
+4. `src/database/database.module.ts`
 5. `src/modules/auth/*`
 6. `src/common/guards/*`
 7. `src/modules/trips/*`
@@ -268,7 +261,7 @@ While reading a module, follow the request:
 ```text
 Route in controller
   calls method in service
-    uses Prisma
+    uses Mongoose models
       returns data
 ```
 
@@ -282,7 +275,7 @@ Do these without looking at the final code first.
 
 - Add a health route that returns app name and current time.
 - Add a DTO with validation for creating a simple trip.
-- Create a Prisma query that lists all trips for one user.
+- Create a Mongoose query that lists all trips for one user.
 
 ### Medium
 
@@ -314,7 +307,7 @@ When something breaks, do not randomly change code. Ask:
 - Is the user authenticated?
 - Is the guard blocking the request?
 - Does the database record exist?
-- Is Prisma throwing a relation or constraint error?
+- Is Mongoose throwing a validation, cast, or duplicate-key error?
 - Is the response shaped how the frontend expects?
 
 Use small checks:
@@ -346,7 +339,8 @@ route.
 
 ### Day 2
 
-Learn Prisma models and migrations. Create `User`, `Trip`, and `TripMember`.
+Learn MongoDB collections and Mongoose schemas. Create `User`, `Trip`, and
+`TripMember`.
 
 ### Day 3
 
@@ -377,8 +371,8 @@ errors clear.
 When you are stuck, reduce the problem:
 
 ```text
-Can I create the database row manually?
-Can I query it with Prisma?
+Can I create the database document manually?
+Can I query it with Mongoose?
 Can I call the service without the controller?
 Can I call the controller without the frontend?
 Can I add the guard back after the route works?

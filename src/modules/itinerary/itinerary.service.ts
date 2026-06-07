@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../../database/prisma.service';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import { Activity, TripDay } from '../../database/schemas';
 import {
   CreateActivityDto,
   CreateDayDto,
@@ -8,68 +10,98 @@ import {
   UpdateDayDto,
 } from './dto/itinerary.dto';
 
+type TripDayReadModel = TripDay & { activities: Activity[] };
+
 @Injectable()
 export class ItineraryService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    @InjectModel(TripDay.name) private readonly tripDays: Model<TripDay>,
+    @InjectModel(Activity.name) private readonly activities: Model<Activity>,
+  ) {}
 
   async getItinerary(tripId: string) {
-    const days = await this.prisma.tripDay.findMany({
-      where: { tripId },
-      include: { activities: { orderBy: { position: 'asc' } } },
-      orderBy: [{ position: 'asc' }, { date: 'asc' }],
-    });
-    const unscheduled = await this.prisma.activity.findMany({
-      where: { tripId, dayId: null },
-      orderBy: { position: 'asc' },
-    });
+    const [days, unscheduled] = await Promise.all([
+      this.tripDays
+        .aggregate<TripDayReadModel>([
+          { $match: { tripId } },
+          { $sort: { position: 1, date: 1 } },
+          {
+            $lookup: {
+              from: 'activities',
+              let: { dayId: '$id' },
+              pipeline: [
+                { $match: { $expr: { $eq: ['$dayId', '$$dayId'] } } },
+                { $sort: { position: 1 } },
+                { $project: { _id: 0 } },
+              ],
+              as: 'activities',
+            },
+          },
+          { $project: { _id: 0 } },
+        ])
+        .exec(),
+      this.activities
+        .find({ tripId, dayId: null })
+        .sort({ position: 1 })
+        .lean()
+        .exec(),
+    ]);
+
     return { days, unscheduled };
   }
 
   async createDay(tripId: string, dto: CreateDayDto) {
-    const count = await this.prisma.tripDay.count({ where: { tripId } });
-    return this.prisma.tripDay.create({
-      data: { ...dto, date: new Date(dto.date), tripId, position: count },
+    const position = await this.tripDays.countDocuments({ tripId }).exec();
+    return this.tripDays.create({
+      ...dto,
+      date: new Date(dto.date),
+      tripId,
+      position,
     });
   }
 
-  async updateDay(dayId: string, dto: UpdateDayDto) {
-    return this.prisma.tripDay.update({ where: { id: dayId }, data: dto });
+  updateDay(dayId: string, dto: UpdateDayDto) {
+    return this.tripDays
+      .findOneAndUpdate({ id: dayId }, dto, { new: true })
+      .exec();
   }
 
   async deleteDay(dayId: string) {
-    await this.prisma.tripDay.delete({ where: { id: dayId } });
+    await this.tripDays.deleteOne({ id: dayId }).exec();
+    await this.activities.updateMany({ dayId }, { dayId: null }).exec();
   }
 
   async createActivity(tripId: string, dto: CreateActivityDto) {
-    const count = await this.prisma.activity.count({
-      where: { tripId, dayId: dto.dayId },
-    });
-    return this.prisma.activity.create({
-      data: { ...dto, tripId, position: count },
+    const position = await this.activities
+      .countDocuments({ tripId, dayId: dto.dayId ?? null })
+      .exec();
+    return this.activities.create({
+      ...dto,
+      tripId,
+      dayId: dto.dayId ?? null,
+      position,
     });
   }
 
-  async updateActivity(activityId: string, dto: UpdateActivityDto) {
-    return this.prisma.activity.update({
-      where: { id: activityId },
-      data: dto,
-    });
+  updateActivity(activityId: string, dto: UpdateActivityDto) {
+    return this.activities
+      .findOneAndUpdate({ id: activityId }, dto, { new: true })
+      .exec();
   }
 
   async deleteActivity(activityId: string) {
-    await this.prisma.activity.delete({ where: { id: activityId } });
+    await this.activities.deleteOne({ id: activityId }).exec();
   }
 
   async reorder(dto: ReorderActivitiesDto) {
-    await this.prisma.$transaction(
+    await Promise.all(
       dto.items.map((item) =>
-        this.prisma.activity.update({
-          where: { id: item.activityId },
-          data: {
-            position: item.position,
-            dayId: item.dayId ?? null,
-          },
-        }),
+        this.activities
+          .updateOne(
+            { id: item.activityId },
+            { position: item.position, dayId: item.dayId ?? null },
+          )
+          .exec(),
       ),
     );
   }

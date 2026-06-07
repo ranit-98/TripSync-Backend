@@ -1,13 +1,12 @@
 # TripSync Backend
 
-NestJS API for TripSync with PostgreSQL, secure backend-set auth cookies, trip
+NestJS API for TripSync with MongoDB, secure backend-set auth cookies, trip
 membership authorization, and Cloudinary direct-upload signing.
 
 ## Stack
 
 - NestJS
-- Prisma ORM
-- PostgreSQL
+- MongoDB with Mongoose
 - JWT access/refresh tokens in `HttpOnly`, `Secure`, `SameSite=None` cookies
 - Cloudinary for cover photos, gallery photos, documents, and chat attachments
 
@@ -16,8 +15,6 @@ membership authorization, and Cloudinary direct-upload signing.
 ```bash
 yarn install
 cp .env.example .env
-yarn prisma:generate
-yarn prisma:migrate
 yarn start:dev
 ```
 
@@ -33,8 +30,12 @@ Swagger UI is available at:
 http://localhost:4000/api/docs
 ```
 
-Prisma reads PostgreSQL from `DATABASE_URL`. Use `yarn prisma:migrate` for local
-schema setup and future database changes.
+Set `MONGODB_URI` to your MongoDB connection string. For local development, the
+app defaults to:
+
+```text
+mongodb://localhost:27017/trip_sync
+```
 
 ## Implemented API Areas
 
@@ -67,6 +68,16 @@ Every trip-scoped controller uses:
 Viewer members can read trip content but cannot create, update, delete, upload,
 invite, settle, send reminders, or send chat messages.
 
+## Data Model
+
+MongoDB collections live in `src/database/schemas/*.schema.ts`. The API uses public UUID
+strings in each document's `id` field, which keeps route params stable and easy
+to read while MongoDB still manages its internal `_id`.
+
+Relations such as trip members, expense splits, chat attachments, and files are
+stored as separate collections. Services attach related records explicitly where
+the API response needs nested data.
+
 ## Upload Flow
 
 1. Collaborator calls `POST /trips/:tripId/uploads/sign`.
@@ -76,4 +87,4 @@ invite, settle, send reminders, or send chat messages.
    - `POST /trips/:tripId/folders/:folderId/documents`
    - `POST /trips/:tripId/cover`
 
-Only metadata is stored in PostgreSQL; Cloudinary stores the binary files.
+Only metadata is stored in MongoDB; Cloudinary stores the binary files.
