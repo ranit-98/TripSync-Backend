@@ -15,13 +15,17 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { TripMemberGuard } from '../../common/guards/trip-member.guard';
 import type { RequestUser } from '../../common/types/request-user.type';
 import { TRIP_MEMBER_ROLES } from '../../common/constants/roles.constants';
+import { ChatGateway } from './chat.gateway';
 import { ChatService } from './chat.service';
 import { CreateAttachmentDto, CreateMessageDto } from './dto/chat.dto';
 
 @Controller('trips/:tripId/messages')
 @UseGuards(JwtAuthGuard, TripMemberGuard)
 export class ChatController {
-  constructor(private readonly chat: ChatService) {}
+  constructor(
+    private readonly chat: ChatService,
+    private readonly chatGateway: ChatGateway,
+  ) {}
 
   @Get()
   async history(@Param('tripId') tripId: string) {
@@ -39,9 +43,12 @@ export class ChatController {
     @CurrentUser() user: RequestUser,
     @Body() dto: CreateMessageDto,
   ) {
+    const message = await this.chat.send(tripId, user.id, dto);
+    this.chatGateway.emitMessageCreated(tripId, message);
+
     return {
       message: MESSAGES.CHAT.SENT,
-      data: await this.chat.send(tripId, user.id, dto),
+      data: message,
     };
   }
 
@@ -60,10 +67,13 @@ export class ChatController {
 
   @Delete(':messageId')
   async delete(
+    @Param('tripId') tripId: string,
     @Param('messageId') messageId: string,
     @CurrentUser() user: RequestUser,
   ) {
     await this.chat.delete(messageId, user.id, user.role);
+    this.chatGateway.emitMessageDeleted(tripId, messageId);
+
     return { message: MESSAGES.CHAT.DELETED };
   }
 }

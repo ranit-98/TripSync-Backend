@@ -58,6 +58,8 @@ export class ExpensesService {
       })),
     );
 
+    await this.recalculateSettlements(tripId);
+
     return this.find(tripId, expenseId);
   }
 
@@ -99,18 +101,24 @@ export class ExpensesService {
       );
     }
 
+    await this.recalculateSettlements(tripId);
+
     return this.find(tripId, expenseId);
   }
 
-  async delete(expenseId: string) {
-    await this.expenses.deleteOne({ id: expenseId }).exec();
+  async delete(tripId: string, expenseId: string) {
+    await this.expenses.deleteOne({ id: expenseId, tripId }).exec();
     await this.expenseSplits.deleteMany({ expenseId }).exec();
+    await this.recalculateSettlements(tripId);
   }
 
   async settlementsSummary(tripId: string) {
     return this.settlements
       .aggregate<SettlementReadModel>([
         { $match: { tripId } },
+        {
+          $sort: { status: 1, amount: -1 },
+        },
         {
           $lookup: {
             from: 'users',
@@ -144,6 +152,81 @@ export class ExpensesService {
         { new: true },
       )
       .exec();
+  }
+
+  private async recalculateSettlements(tripId: string) {
+    const expenses = await this.expenses.find({ tripId }).lean().exec();
+    const expenseIds = expenses.map((expense) => expense.id);
+    const splits = await this.expenseSplits
+      .find({ expenseId: { $in: expenseIds } })
+      .lean()
+      .exec();
+    const splitsByExpenseId = splits.reduce<Map<string, ExpenseSplit[]>>(
+      (result, split) => {
+        const current = result.get(split.expenseId) ?? [];
+        current.push(split);
+        result.set(split.expenseId, current);
+
+        return result;
+      },
+      new Map(),
+    );
+    const balances = new Map<string, number>();
+    const addBalance = (userId: string, amount: number) => {
+      balances.set(userId, Number(((balances.get(userId) ?? 0) + amount).toFixed(2)));
+    };
+
+    expenses.forEach((expense) => {
+      addBalance(expense.paidByUserId, Number(expense.amount || 0));
+
+      (splitsByExpenseId.get(expense.id) ?? []).forEach((split) => {
+        addBalance(split.userId, -Number(split.amount || 0));
+      });
+    });
+
+    const debtors = Array.from(balances.entries())
+      .filter(([, balance]) => balance < -0.009)
+      .map(([userId, balance]) => ({ userId, amount: Math.abs(balance) }))
+      .sort((a, b) => b.amount - a.amount);
+    const creditors = Array.from(balances.entries())
+      .filter(([, balance]) => balance > 0.009)
+      .map(([userId, balance]) => ({ userId, amount: balance }))
+      .sort((a, b) => b.amount - a.amount);
+    const settlements: Array<{
+      amount: number;
+      fromUserId: string;
+      toUserId: string;
+      tripId: string;
+    }> = [];
+    let debtorIndex = 0;
+    let creditorIndex = 0;
+
+    while (debtorIndex < debtors.length && creditorIndex < creditors.length) {
+      const debtor = debtors[debtorIndex];
+      const creditor = creditors[creditorIndex];
+      const amount = Number(Math.min(debtor.amount, creditor.amount).toFixed(2));
+
+      if (amount > 0) {
+        settlements.push({
+          amount,
+          fromUserId: debtor.userId,
+          toUserId: creditor.userId,
+          tripId,
+        });
+      }
+
+      debtor.amount = Number((debtor.amount - amount).toFixed(2));
+      creditor.amount = Number((creditor.amount - amount).toFixed(2));
+
+      if (debtor.amount <= 0.009) debtorIndex += 1;
+      if (creditor.amount <= 0.009) creditorIndex += 1;
+    }
+
+    await this.settlements.deleteMany({ tripId }).exec();
+
+    if (settlements.length) {
+      await this.settlements.insertMany(settlements);
+    }
   }
 
   private expenseReadPipeline(match: Record<string, unknown>): PipelineStage[] {

@@ -200,6 +200,14 @@ export class TripsController {
     };
   }
 
+  @Get('invites')
+  async pendingInvites(@CurrentUser() user: RequestUser) {
+    return {
+      message: MESSAGES.MEMBERS.INVITES_LISTED,
+      data: await this.trips.listPendingInvites(user.email),
+    };
+  }
+
   @Patch('trips/:tripId/members/:memberId')
   @UseGuards(TripOwnerOrAdminGuard)
   @ApiBody({ type: UpdateMemberDto })

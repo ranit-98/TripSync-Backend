@@ -24,10 +24,23 @@ type TripDetails = Trip & {
   members: TripMemberWithUser[];
   invites: TripInvite[];
 };
+type TripInviteWithTrip = TripInvite & { trip: Trip | null };
 type LookupPipelineStage = Exclude<
   PipelineStage,
   PipelineStage.Merge | PipelineStage.Out
 >;
+
+const DEFAULT_TRIP_COVER_URL =
+  'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1800&q=80';
+
+function isDuplicateKeyError(error: unknown) {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 11000
+  );
+}
 
 @Injectable()
 export class TripsService {
@@ -69,6 +82,7 @@ export class TripsService {
             $or: [{ ownerId: userId }, { requesterMembership: { $ne: [] } }],
           },
         },
+        this.defaultCoverStage(),
         { $sort: { startDate: 1 } },
         { $project: { _id: 0, requesterMembership: 0 } },
       ])
@@ -84,7 +98,7 @@ export class TripsService {
       endDate: new Date(dto.endDate),
       currency: dto.currency ?? 'USD',
       budget: dto.budget ?? 0,
-      coverUrl: dto.coverUrl ?? null,
+      coverUrl: dto.coverUrl ?? DEFAULT_TRIP_COVER_URL,
       styles: dto.styles ?? [],
     });
 
@@ -151,6 +165,49 @@ export class TripsService {
     });
   }
 
+  listPendingInvites(userEmail: string) {
+    return this.tripInvites
+      .aggregate<TripInviteWithTrip>([
+        {
+          $match: {
+            email: userEmail.toLowerCase(),
+            status: INVITE_STATUSES.PENDING,
+          },
+        },
+        {
+          $lookup: {
+            from: 'trips',
+            localField: 'tripId',
+            foreignField: 'id',
+            pipeline: [
+              { $match: { status: 'active' } },
+              {
+                $project: {
+                  _id: 0,
+                  id: 1,
+                  title: 1,
+                  destination: 1,
+                  startDate: 1,
+                  endDate: 1,
+                  currency: 1,
+                  budget: 1,
+                  coverUrl: 1,
+                  styles: 1,
+                  createdAt: 1,
+                  updatedAt: 1,
+                },
+              },
+            ],
+            as: 'trip',
+          },
+        },
+        { $unwind: { path: '$trip', preserveNullAndEmptyArrays: true } },
+        { $sort: { createdAt: -1 } },
+        { $project: { _id: 0 } },
+      ])
+      .exec();
+  }
+
   async updateMember(memberId: string, dto: UpdateMemberDto) {
     const member = await this.tripMembers
       .findOneAndUpdate({ id: memberId }, { role: dto.role }, { new: true })
@@ -175,11 +232,24 @@ export class TripsService {
       throw new BadRequestException('Invite is no longer pending');
     }
 
-    await this.tripMembers.updateOne(
-      { tripId: invite.tripId, userId },
-      { $setOnInsert: { tripId: invite.tripId, userId, role: invite.role } },
-      { upsert: true },
-    );
+    const existingMember = await this.tripMembers
+      .exists({ tripId: invite.tripId, userId })
+      .exec();
+
+    if (!existingMember) {
+      try {
+        await this.tripMembers.create({
+          tripId: invite.tripId,
+          userId,
+          role: invite.role,
+        });
+      } catch (error) {
+        if (!isDuplicateKeyError(error)) {
+          throw error;
+        }
+      }
+    }
+
     await this.tripInvites
       .updateOne({ id: invite.id }, { status: INVITE_STATUSES.ACCEPTED })
       .exec();
@@ -199,6 +269,7 @@ export class TripsService {
     return [
       { $match: { id: tripId } },
       { $limit: 1 },
+      this.defaultCoverStage(),
       {
         $lookup: {
           from: 'users',
@@ -231,6 +302,16 @@ export class TripsService {
       },
       { $project: { _id: 0 } },
     ];
+  }
+
+  private defaultCoverStage(): PipelineStage.AddFields {
+    return {
+      $addFields: {
+        coverUrl: {
+          $ifNull: ['$coverUrl', DEFAULT_TRIP_COVER_URL],
+        },
+      },
+    };
   }
 
   private membersWithUsersPipeline(tripId?: string): LookupPipelineStage[] {

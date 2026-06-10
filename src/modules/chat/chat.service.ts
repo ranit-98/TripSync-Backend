@@ -28,35 +28,18 @@ export class ChatService {
 
   async history(tripId: string) {
     return this.messages
-      .aggregate<MessageReadModel>([
-        { $match: { tripId } },
-        { $sort: { createdAt: 1 } },
-        {
-          $lookup: {
-            from: 'users',
-            localField: 'senderId',
-            foreignField: 'id',
-            pipeline: [this.publicUserProject()],
-            as: 'sender',
-          },
-        },
-        { $unwind: { path: '$sender', preserveNullAndEmptyArrays: true } },
-        {
-          $lookup: {
-            from: 'message_attachments',
-            localField: 'id',
-            foreignField: 'messageId',
-            pipeline: [{ $project: { _id: 0 } }],
-            as: 'attachments',
-          },
-        },
-        { $project: { _id: 0 } },
-      ])
+      .aggregate<MessageReadModel>(this.messageReadPipeline({ tripId }))
       .exec();
   }
 
-  send(tripId: string, senderId: string, dto: CreateMessageDto) {
-    return this.messages.create({ tripId, senderId, body: dto.body });
+  async send(tripId: string, senderId: string, dto: CreateMessageDto) {
+    const message = await this.messages.create({
+      tripId,
+      senderId,
+      body: dto.body,
+    });
+
+    return this.findMessage(String(message.id));
   }
 
   async attach(messageId: string, dto: CreateAttachmentDto) {
@@ -73,6 +56,43 @@ export class ChatService {
     }
     await this.messages.deleteOne({ id: messageId }).exec();
     await this.attachments.deleteMany({ messageId }).exec();
+  }
+
+  private async findMessage(messageId: string) {
+    const [message] = await this.messages
+      .aggregate<MessageReadModel>(this.messageReadPipeline({ id: messageId }))
+      .exec();
+
+    if (!message) throw new NotFoundException(MESSAGES.COMMON.NOT_FOUND);
+
+    return message;
+  }
+
+  private messageReadPipeline(match: Record<string, unknown>): PipelineStage[] {
+    return [
+      { $match: match },
+      { $sort: { createdAt: 1 } },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'senderId',
+          foreignField: 'id',
+          pipeline: [this.publicUserProject()],
+          as: 'sender',
+        },
+      },
+      { $unwind: { path: '$sender', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: 'message_attachments',
+          localField: 'id',
+          foreignField: 'messageId',
+          pipeline: [{ $project: { _id: 0 } }],
+          as: 'attachments',
+        },
+      },
+      { $project: { _id: 0 } },
+    ];
   }
 
   private publicUserProject(): PipelineStage.Project {

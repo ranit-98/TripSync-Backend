@@ -23,6 +23,7 @@ export const MESSAGES = {
   },
   MEMBERS: {
     LISTED: 'Members fetched successfully',
+    INVITES_LISTED: 'Invites fetched successfully',
     INVITED: 'Invite created successfully',
     UPDATED: 'Member updated successfully',
     REMOVED: 'Member removed successfully',

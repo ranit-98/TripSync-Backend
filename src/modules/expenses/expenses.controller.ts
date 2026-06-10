@@ -67,8 +67,11 @@ export class ExpensesController {
 
   @Delete('expenses/:expenseId')
   @TripRoles(TRIP_MEMBER_ROLES.COLLABORATOR)
-  async delete(@Param('expenseId') expenseId: string) {
-    await this.expenses.delete(expenseId);
+  async delete(
+    @Param('tripId') tripId: string,
+    @Param('expenseId') expenseId: string,
+  ) {
+    await this.expenses.delete(tripId, expenseId);
     return { message: MESSAGES.EXPENSES.DELETED };
   }
 
