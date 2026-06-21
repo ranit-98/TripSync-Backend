@@ -5,6 +5,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import appConfig from './config/app.config';
 import { DatabaseModule } from './database/database.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { ExpensesModule } from './modules/expenses/expenses.module';
@@ -21,6 +22,7 @@ import { UsersModule } from './modules/users/users.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true, load: [appConfig] }),
     DatabaseModule,
+    DashboardModule,
     AuthModule,
     UsersModule,
     TripsModule,

@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Patch,
+  Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -24,6 +25,11 @@ export class UsersController {
     private readonly users: UsersService,
     private readonly uploads: UploadsService,
   ) {}
+
+  @Get('search')
+  async search(@CurrentUser() user: RequestUser, @Query('q') query = '') {
+    return { data: await this.users.search(query, user.id) };
+  }
 
   @Get('me')
   async me(@CurrentUser() user: RequestUser) {

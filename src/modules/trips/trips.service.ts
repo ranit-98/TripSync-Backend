@@ -11,6 +11,7 @@ import {
   TRIP_MEMBER_ROLES,
 } from '../../common/constants/roles.constants';
 import { Trip, TripInvite, TripMember, User } from '../../database/schemas';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   CreateTripDto,
   InviteMemberDto,
@@ -51,6 +52,7 @@ export class TripsService {
     @InjectModel(TripInvite.name)
     private readonly tripInvites: Model<TripInvite>,
     @InjectModel(User.name) private readonly users: Model<User>,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async listForUser(userId: string) {
@@ -110,13 +112,14 @@ export class TripsService {
     });
 
     if (dto.inviteEmail) {
-      await this.tripInvites.create({
+      const invite = await this.tripInvites.create({
         tripId: trip.id,
         email: dto.inviteEmail.toLowerCase(),
         role: dto.inviteRole ?? TRIP_MEMBER_ROLES.VIEWER,
         invitedBy: ownerId,
         notes: dto.inviteNotes ?? null,
       });
+      await this.createInviteNotification(invite, trip);
     }
 
     return trip;
@@ -155,14 +158,18 @@ export class TripsService {
       .exec();
   }
 
-  invite(tripId: string, invitedBy: string, dto: InviteMemberDto) {
-    return this.tripInvites.create({
+  async invite(tripId: string, invitedBy: string, dto: InviteMemberDto) {
+    const invite = await this.tripInvites.create({
       tripId,
       email: dto.email.toLowerCase(),
       role: dto.role,
       invitedBy,
       notes: dto.notes ?? null,
     });
+    const trip = await this.trips.findOne({ id: tripId }).lean().exec();
+    await this.createInviteNotification(invite, trip);
+
+    return invite;
   }
 
   listPendingInvites(userEmail: string) {
@@ -253,6 +260,13 @@ export class TripsService {
     await this.tripInvites
       .updateOne({ id: invite.id }, { status: INVITE_STATUSES.ACCEPTED })
       .exec();
+    await this.notifications.deleteForResource(userId, 'trip_invite', invite.id);
+    await this.notifyTripMembers(
+      invite.tripId,
+      userId,
+      'trip_member_joined',
+      `${(await this.users.findOne({ id: userId }).lean().exec())?.name ?? userEmail} joined the trip.`,
+    );
   }
 
   async declineInvite(inviteId: string, userEmail: string) {
@@ -263,6 +277,54 @@ export class TripsService {
     await this.tripInvites
       .updateOne({ id: invite.id }, { status: INVITE_STATUSES.DECLINED })
       .exec();
+    const invitee = await this.users.findOne({ email: invite.email }).lean().exec();
+    if (invitee) {
+      await this.notifications.deleteForResource(invitee.id, 'trip_invite', invite.id);
+    }
+    await this.notifyTripMembers(
+      invite.tripId,
+      invitee?.id,
+      'trip_invite_declined',
+      `${invitee?.name ?? invite.email} declined the trip invitation.`,
+    );
+  }
+
+  private async createInviteNotification(invite: TripInvite, trip: Trip | null) {
+    const invitee = await this.users.findOne({ email: invite.email }).lean().exec();
+    if (!invitee) return;
+
+    await this.notifications.createForUser(invitee.id, {
+      body: invite.notes ?? `You have been invited as a ${invite.role}.`,
+      resourceId: invite.id,
+      resourceType: 'trip_invite',
+      title: trip?.title ?? 'New trip invite',
+      tripId: invite.tripId,
+      type: 'trip_invite',
+    });
+  }
+
+  private async notifyTripMembers(
+    tripId: string,
+    actorId: string | undefined,
+    type: 'trip_invite_declined' | 'trip_member_joined',
+    body: string,
+  ) {
+    const [trip, members] = await Promise.all([
+      this.trips.findOne({ id: tripId }).lean().exec(),
+      this.tripMembers.find({ tripId }).lean().exec(),
+    ]);
+    const recipientIds = [...new Set(members.map((member) => member.userId).filter((userId) => userId !== actorId))];
+
+    await Promise.all(
+      recipientIds.map((userId) => this.notifications.createForUser(userId, {
+        body,
+        resourceId: tripId,
+        resourceType: 'trip',
+        title: trip?.title ?? 'Trip activity',
+        tripId,
+        type,
+      })),
+    );
   }
 
   private tripDetailsPipeline(tripId: string): PipelineStage[] {

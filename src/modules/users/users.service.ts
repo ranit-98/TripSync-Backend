@@ -22,6 +22,19 @@ export class UsersService {
     return this.toProfile(user);
   }
 
+  async search(query: string, excludeUserId: string) {
+    const term = query.trim();
+    if (term.length < 2) return [];
+
+    const expression = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    const users = await this.users
+      .find({ id: { $ne: excludeUserId }, $or: [{ name: expression }, { email: expression }] })
+      .limit(8)
+      .exec();
+
+    return users.map((user) => this.toProfile(user));
+  }
+
   async updateProfile(userId: string, dto: UpdateUserDto) {
     await this.users.updateOne({ id: userId }, dto).exec();
     return this.findProfile(userId);
