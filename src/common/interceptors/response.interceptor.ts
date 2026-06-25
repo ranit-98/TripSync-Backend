@@ -9,6 +9,7 @@ import { map, Observable } from 'rxjs';
 type ApiPayload<T> = {
   message?: string;
   data?: T;
+  pagination?: Record<string, unknown>;
 };
 
 @Injectable()
@@ -25,6 +26,7 @@ export class ResponseInterceptor<T> implements NestInterceptor<
         success: true,
         message: payload?.message ?? 'Request completed successfully',
         data: payload?.data ?? null,
+        ...(payload?.pagination ? { pagination: payload.pagination } : {}),
       })),
     );
   }

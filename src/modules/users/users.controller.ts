@@ -17,6 +17,7 @@ import type { RequestUser } from '../../common/types/request-user.type';
 import { UploadsService } from '../uploads/uploads.service';
 import { ChangePasswordDto, UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard)
@@ -27,8 +28,9 @@ export class UsersController {
   ) {}
 
   @Get('search')
-  async search(@CurrentUser() user: RequestUser, @Query('q') query = '') {
-    return { data: await this.users.search(query, user.id) };
+  async search(@CurrentUser() user: RequestUser, @Query('q') search = '', @Query() query: PaginationQueryDto) {
+    const result = await this.users.search(search, user.id, query);
+    return { data: result.items, pagination: result.pagination };
   }
 
   @Get('me')

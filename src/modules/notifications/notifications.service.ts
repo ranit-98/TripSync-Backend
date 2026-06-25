@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import { MESSAGES } from '../../common/constants/messages.constants';
 import { Notification } from '../../database/schemas';
 import { NotificationsGateway } from './notifications.gateway';
+import { PaginationQueryDto, paginationMeta } from '../../common/dto/pagination-query.dto';
 
 @Injectable()
 export class NotificationsService {
@@ -24,12 +25,12 @@ export class NotificationsService {
     return value;
   }
 
-  list(userId: string) {
-    return this.notifications
-      .find({ userId })
-      .sort({ createdAt: -1 })
-      .lean()
-      .exec();
+  async list(userId: string, query: PaginationQueryDto) {
+    const [items, total] = await Promise.all([
+      this.notifications.find({ userId }).sort({ createdAt: -1 }).skip((query.page - 1) * query.limit).limit(query.limit).lean().exec(),
+      this.notifications.countDocuments({ userId }).exec(),
+    ]);
+    return { items, pagination: paginationMeta(query, total) };
   }
 
   async markRead(userId: string, notificationId: string) {

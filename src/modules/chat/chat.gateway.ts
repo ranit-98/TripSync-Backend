@@ -6,6 +6,7 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { getCorsOrigins } from '../../config/cors-origins';
 import { Message, MessageAttachment, User } from '../../database/schemas';
 
 type ChatMessagePayload = Message & {
@@ -28,7 +29,7 @@ const roomName = (tripId: string) => `trip:${tripId}:chat`;
 @WebSocketGateway({
   cors: {
     credentials: true,
-    origin: process.env.FRONTEND_URL ?? 'http://localhost:3000',
+    origin: getCorsOrigins(),
   },
 })
 export class ChatGateway {

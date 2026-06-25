@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBody } from '@nestjs/swagger';
@@ -16,6 +17,9 @@ import { TripMemberGuard } from '../../common/guards/trip-member.guard';
 import { TRIP_MEMBER_ROLES } from '../../common/constants/roles.constants';
 import { CreateExpenseDto, UpdateExpenseDto } from './dto/expense.dto';
 import { ExpensesService } from './expenses.service';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { RequestUser } from '../../common/types/request-user.type';
 
 @Controller('trips/:tripId')
 @UseGuards(JwtAuthGuard, TripMemberGuard)
@@ -23,10 +27,12 @@ export class ExpensesController {
   constructor(private readonly expenses: ExpensesService) {}
 
   @Get('expenses')
-  async list(@Param('tripId') tripId: string) {
+  async list(@Param('tripId') tripId: string, @Query() query: PaginationQueryDto) {
+    const result = await this.expenses.list(tripId, query);
     return {
       message: MESSAGES.EXPENSES.LISTED,
-      data: await this.expenses.list(tripId),
+      data: result.items,
+      pagination: result.pagination,
     };
   }
 
@@ -76,25 +82,31 @@ export class ExpensesController {
   }
 
   @Get('settlements')
-  async settlements(@Param('tripId') tripId: string) {
+  async settlements(@Param('tripId') tripId: string, @Query() query: PaginationQueryDto) {
+    const result = await this.expenses.settlementsSummary(tripId, query);
     return {
       message: MESSAGES.EXPENSES.SETTLEMENTS,
-      data: await this.expenses.settlementsSummary(tripId),
+      data: result.items,
+      pagination: result.pagination,
     };
   }
 
-  @Post('settlements/:settlementId/mark-paid')
-  @TripRoles(TRIP_MEMBER_ROLES.COLLABORATOR)
-  async markPaid(@Param('settlementId') settlementId: string) {
+  @Post('settlements/:settlementId/declare-paid')
+  async declarePaid(@Param('tripId') tripId: string, @Param('settlementId') settlementId: string, @CurrentUser() user: RequestUser) {
     return {
-      message: MESSAGES.EXPENSES.SETTLED,
-      data: await this.expenses.markPaid(settlementId),
+      message: 'Payment declaration sent for confirmation.',
+      data: await this.expenses.declarePaid(tripId, settlementId, user.id),
     };
   }
 
-  @Post('settlements/reminders')
-  @TripRoles(TRIP_MEMBER_ROLES.COLLABORATOR)
-  reminders() {
+  @Post('settlements/:settlementId/confirm-paid')
+  async confirmPaid(@Param('tripId') tripId: string, @Param('settlementId') settlementId: string, @CurrentUser() user: RequestUser) {
+    return { message: MESSAGES.EXPENSES.SETTLED, data: await this.expenses.confirmPaid(tripId, settlementId, user.id) };
+  }
+
+  @Post('settlements/:settlementId/reminder')
+  async reminder(@Param('tripId') tripId: string, @Param('settlementId') settlementId: string, @CurrentUser() user: RequestUser) {
+    await this.expenses.sendReminder(tripId, settlementId, user.id);
     return { message: MESSAGES.EXPENSES.REMINDER_SENT };
   }
 }

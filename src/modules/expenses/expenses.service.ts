@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage } from 'mongoose';
 import { MESSAGES } from '../../common/constants/messages.constants';
@@ -10,6 +10,8 @@ import {
   type User,
 } from '../../database/schemas';
 import { CreateExpenseDto, UpdateExpenseDto } from './dto/expense.dto';
+import { NotificationsService } from '../notifications/notifications.service';
+import { PaginationQueryDto, paginationMeta } from '../../common/dto/pagination-query.dto';
 
 type ExpenseReadModel = Expense & {
   splits: Array<ExpenseSplit & { user: User | null }>;
@@ -29,12 +31,16 @@ export class ExpensesService {
     private readonly expenseSplits: Model<ExpenseSplit>,
     @InjectModel(Settlement.name)
     private readonly settlements: Model<Settlement>,
+    private readonly notifications: NotificationsService,
   ) {}
 
-  async list(tripId: string) {
-    return this.expenses
-      .aggregate<ExpenseReadModel>(this.expenseReadPipeline({ tripId }))
-      .exec();
+  async list(tripId: string, query: PaginationQueryDto) {
+    const pipeline = this.expenseReadPipeline({ tripId });
+    const [items, total] = await Promise.all([
+      this.expenses.aggregate<ExpenseReadModel>([...pipeline, { $skip: (query.page - 1) * query.limit }, { $limit: query.limit }]).exec(),
+      this.expenses.countDocuments({ tripId }).exec(),
+    ]);
+    return { items, pagination: paginationMeta(query, total) };
   }
 
   async create(tripId: string, dto: CreateExpenseDto) {
@@ -112,9 +118,8 @@ export class ExpensesService {
     await this.recalculateSettlements(tripId);
   }
 
-  async settlementsSummary(tripId: string) {
-    return this.settlements
-      .aggregate<SettlementReadModel>([
+  async settlementsSummary(tripId: string, query: PaginationQueryDto) {
+    const pipeline: PipelineStage[] = [
         { $match: { tripId } },
         {
           $sort: { status: 1, amount: -1 },
@@ -139,19 +144,38 @@ export class ExpensesService {
           },
         },
         { $unwind: { path: '$toUser', preserveNullAndEmptyArrays: true } },
-        { $project: { _id: 0 } },
-      ])
-      .exec();
+      { $project: { _id: 0 } },
+    ];
+    const [items, total] = await Promise.all([
+      this.settlements.aggregate<SettlementReadModel>([...pipeline, { $skip: (query.page - 1) * query.limit }, { $limit: query.limit }]).exec(),
+      this.settlements.countDocuments({ tripId }).exec(),
+    ]);
+    return { items, pagination: paginationMeta(query, total) };
   }
 
-  markPaid(settlementId: string) {
-    return this.settlements
-      .findOneAndUpdate(
-        { id: settlementId },
-        { status: SETTLEMENT_STATUSES.PAID },
-        { new: true },
-      )
-      .exec();
+  async declarePaid(tripId: string, settlementId: string, userId: string) {
+    const settlement = await this.settlements.findOne({ id: settlementId, tripId, fromUserId: userId, status: SETTLEMENT_STATUSES.PENDING }).exec();
+    if (!settlement) throw new ForbiddenException('Only the member who owes this amount can declare payment.');
+    settlement.status = SETTLEMENT_STATUSES.PAYMENT_DECLARED;
+    await settlement.save();
+    await this.notifications.createForUser(settlement.toUserId, { tripId, type: 'settlement_payment_declared', title: 'Payment awaiting your confirmation', body: `A trip member declared payment of ${settlement.amount}. Confirm after you receive it.`, resourceType: 'settlement', resourceId: settlement.id });
+    return settlement;
+  }
+
+  async confirmPaid(tripId: string, settlementId: string, userId: string) {
+    const settlement = await this.settlements.findOne({ id: settlementId, tripId, toUserId: userId, status: SETTLEMENT_STATUSES.PAYMENT_DECLARED }).exec();
+    if (!settlement) throw new ForbiddenException('Only the member receiving this payment can confirm it.');
+    settlement.status = SETTLEMENT_STATUSES.PAID;
+    await settlement.save();
+    await this.notifications.createForUser(settlement.fromUserId, { tripId, type: 'settlement_payment_confirmed', title: 'Payment confirmed', body: `Your payment of ${settlement.amount} was confirmed.`, resourceType: 'settlement', resourceId: settlement.id });
+    return settlement;
+  }
+
+  async sendReminder(tripId: string, settlementId: string, userId: string) {
+    const settlement = await this.settlements.findOne({ id: settlementId, tripId, toUserId: userId, status: SETTLEMENT_STATUSES.PENDING }).exec();
+    if (!settlement) throw new ForbiddenException('Only the person owed can send a reminder.');
+    await this.notifications.createForUser(settlement.fromUserId, { tripId, type: 'settlement_reminder', title: 'Settlement reminder', body: `You still owe ${settlement.amount} for this trip.`, resourceType: 'settlement', resourceId: settlement.id });
+    return settlement;
   }
 
   private async recalculateSettlements(tripId: string) {

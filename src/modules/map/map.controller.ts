@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBody } from '@nestjs/swagger';
@@ -16,6 +17,7 @@ import { TripMemberGuard } from '../../common/guards/trip-member.guard';
 import { TRIP_MEMBER_ROLES } from '../../common/constants/roles.constants';
 import { CreateLocationDto, UpdateLocationDto } from './dto/location.dto';
 import { MapService } from './map.service';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 @Controller('trips/:tripId')
 @UseGuards(JwtAuthGuard, TripMemberGuard)
@@ -23,8 +25,9 @@ export class MapController {
   constructor(private readonly map: MapService) {}
 
   @Get('locations')
-  async list(@Param('tripId') tripId: string) {
-    return { message: MESSAGES.MAP.LISTED, data: await this.map.list(tripId) };
+  async list(@Param('tripId') tripId: string, @Query() query: PaginationQueryDto) {
+    const result = await this.map.list(tripId, query);
+    return { message: MESSAGES.MAP.LISTED, data: result.items, pagination: result.pagination };
   }
 
   @Post('locations')

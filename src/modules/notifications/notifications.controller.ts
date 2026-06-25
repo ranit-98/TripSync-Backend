@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Patch,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { MESSAGES } from '../../common/constants/messages.constants';
@@ -11,6 +12,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import type { RequestUser } from '../../common/types/request-user.type';
 import { NotificationsService } from './notifications.service';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 @Controller('notifications')
 @UseGuards(JwtAuthGuard)
@@ -18,10 +20,12 @@ export class NotificationsController {
   constructor(private readonly notifications: NotificationsService) {}
 
   @Get()
-  async list(@CurrentUser() user: RequestUser) {
+  async list(@CurrentUser() user: RequestUser, @Query() query: PaginationQueryDto) {
+    const result = await this.notifications.list(user.id, query);
     return {
       message: MESSAGES.NOTIFICATIONS.LISTED,
-      data: await this.notifications.list(user.id),
+      data: result.items,
+      pagination: result.pagination,
     };
   }
 

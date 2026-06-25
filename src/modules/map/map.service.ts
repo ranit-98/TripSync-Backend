@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Location } from '../../database/schemas';
 import { CreateLocationDto, UpdateLocationDto } from './dto/location.dto';
+import { PaginationQueryDto, paginationMeta } from '../../common/dto/pagination-query.dto';
 
 @Injectable()
 export class MapService {
@@ -10,8 +11,12 @@ export class MapService {
     @InjectModel(Location.name) private readonly locations: Model<Location>,
   ) {}
 
-  list(tripId: string) {
-    return this.locations.find({ tripId }).sort({ position: 1 }).lean().exec();
+  async list(tripId: string, query: PaginationQueryDto) {
+    const [items, total] = await Promise.all([
+      this.locations.find({ tripId }).sort({ position: 1 }).skip((query.page - 1) * query.limit).limit(query.limit).lean().exec(),
+      this.locations.countDocuments({ tripId }).exec(),
+    ]);
+    return { items, pagination: paginationMeta(query, total) };
   }
 
   async create(tripId: string, dto: CreateLocationDto) {

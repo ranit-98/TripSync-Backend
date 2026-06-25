@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBody } from '@nestjs/swagger';
@@ -18,6 +19,7 @@ import { TRIP_MEMBER_ROLES } from '../../common/constants/roles.constants';
 import { ChatGateway } from './chat.gateway';
 import { ChatService } from './chat.service';
 import { CreateAttachmentDto, CreateMessageDto } from './dto/chat.dto';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 @Controller('trips/:tripId/messages')
 @UseGuards(JwtAuthGuard, TripMemberGuard)
@@ -28,10 +30,12 @@ export class ChatController {
   ) {}
 
   @Get()
-  async history(@Param('tripId') tripId: string) {
+  async history(@Param('tripId') tripId: string, @Query() query: PaginationQueryDto) {
+    const result = await this.chat.history(tripId, query);
     return {
       message: MESSAGES.CHAT.HISTORY,
-      data: await this.chat.history(tripId),
+      data: result.items,
+      pagination: result.pagination,
     };
   }
 

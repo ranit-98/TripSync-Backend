@@ -6,6 +6,7 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { getCorsOrigins } from '../../config/cors-origins';
 import { Notification } from '../../database/schemas';
 
 const userRoom = (userId: string) => `user:${userId}:notifications`;
@@ -13,7 +14,7 @@ const userRoom = (userId: string) => `user:${userId}:notifications`;
 @WebSocketGateway({
   cors: {
     credentials: true,
-    origin: process.env.FRONTEND_URL ?? 'http://localhost:3000',
+    origin: getCorsOrigins(),
   },
 })
 export class NotificationsGateway {

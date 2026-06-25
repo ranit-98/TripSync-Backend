@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBody } from '@nestjs/swagger';
@@ -23,6 +24,7 @@ import {
   UpdateFolderDto,
 } from './dto/files.dto';
 import { FilesService } from './files.service';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 @Controller('trips/:tripId')
 @UseGuards(JwtAuthGuard, TripMemberGuard)
@@ -30,10 +32,12 @@ export class FilesController {
   constructor(private readonly files: FilesService) {}
 
   @Get('folders')
-  async folders(@Param('tripId') tripId: string) {
+  async folders(@Param('tripId') tripId: string, @Query() query: PaginationQueryDto) {
+    const result = await this.files.foldersForTrip(tripId, query);
     return {
       message: MESSAGES.FILES.FOLDERS,
-      data: await this.files.foldersForTrip(tripId),
+      data: result.items,
+      pagination: result.pagination,
     };
   }
 
@@ -72,10 +76,12 @@ export class FilesController {
   }
 
   @Get('folders/:folderId/documents')
-  async documents(@Param('folderId') folderId: string) {
+  async documents(@Param('folderId') folderId: string, @Query() query: PaginationQueryDto) {
+    const result = await this.files.documentsForFolder(folderId, query);
     return {
       message: MESSAGES.FILES.DOCUMENTS,
-      data: await this.files.documentsForFolder(folderId),
+      data: result.items,
+      pagination: result.pagination,
     };
   }
 

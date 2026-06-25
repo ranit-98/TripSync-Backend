@@ -22,5 +22,6 @@ export const INVITE_STATUSES = {
 
 export const SETTLEMENT_STATUSES = {
   PENDING: 'pending',
+  PAYMENT_DECLARED: 'payment_declared',
   PAID: 'paid',
 } as const;

@@ -16,6 +16,9 @@ export class DocumentFolder implements BaseDocument {
   @Prop({ type: String, default: null })
   description: string | null;
 
+  @Prop({ type: String, default: null, index: true })
+  parentId: string | null;
+
   @Prop({ required: true })
   createdBy: string;
 
@@ -65,3 +68,4 @@ export type DocumentDocument = HydratedDocument<Document>;
 export const DocumentFolderSchema =
   SchemaFactory.createForClass(DocumentFolder);
 export const DocumentSchema = SchemaFactory.createForClass(Document);
+DocumentFolderSchema.index({ tripId: 1, parentId: 1, name: 1 }, { unique: true });

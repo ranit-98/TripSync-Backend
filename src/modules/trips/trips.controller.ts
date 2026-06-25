@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -31,6 +32,7 @@ import {
   UploadCoverDto,
 } from './dto/trip.dto';
 import { TripsService } from './trips.service';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 @Controller()
 @UseGuards(JwtAuthGuard)
@@ -41,10 +43,12 @@ export class TripsController {
   ) {}
 
   @Get('trips')
-  async list(@CurrentUser() user: RequestUser) {
+  async list(@CurrentUser() user: RequestUser, @Query() query: PaginationQueryDto) {
+    const result = await this.trips.listForUser(user.id, query);
     return {
       message: MESSAGES.TRIPS.LISTED,
-      data: await this.trips.listForUser(user.id),
+      data: result.items,
+      pagination: result.pagination,
     };
   }
 
@@ -178,10 +182,12 @@ export class TripsController {
 
   @Get('trips/:tripId/members')
   @UseGuards(TripMemberGuard)
-  async members(@Param('tripId') tripId: string) {
+  async members(@Param('tripId') tripId: string, @Query() query: PaginationQueryDto) {
+    const result = await this.trips.listMembers(tripId, query);
     return {
       message: MESSAGES.MEMBERS.LISTED,
-      data: await this.trips.listMembers(tripId),
+      data: result.items,
+      pagination: result.pagination,
     };
   }
 
@@ -201,10 +207,12 @@ export class TripsController {
   }
 
   @Get('invites')
-  async pendingInvites(@CurrentUser() user: RequestUser) {
+  async pendingInvites(@CurrentUser() user: RequestUser, @Query() query: PaginationQueryDto) {
+    const result = await this.trips.listPendingInvites(user.email, query);
     return {
       message: MESSAGES.MEMBERS.INVITES_LISTED,
-      data: await this.trips.listPendingInvites(user.email),
+      data: result.items,
+      pagination: result.pagination,
     };
   }
 

@@ -10,6 +10,11 @@ export class CreateFolderDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @ApiPropertyOptional({ example: 'parent-folder-id', nullable: true })
+  @IsOptional()
+  @IsString()
+  parentId?: string | null;
 }
 
 export class UpdateFolderDto extends PartialType(CreateFolderDto) {}

@@ -95,11 +95,12 @@ export class AuthController {
     refreshToken: string,
   ) {
     const domain = this.config.get<string>('cookies.domain');
+    const isProduction = this.config.get<string>('app.nodeEnv') === 'production';
     const base = {
       httpOnly: true,
-      secure: true,
-      sameSite: 'none' as const,
-      domain,
+      secure: isProduction,
+      sameSite: isProduction ? ('none' as const) : ('lax' as const),
+      ...(domain ? { domain } : {}),
       path: '/',
     };
 
@@ -123,10 +124,11 @@ export class AuthController {
 
   private clearAuthCookies(res: Response) {
     const domain = this.config.get<string>('cookies.domain');
+    const isProduction = this.config.get<string>('app.nodeEnv') === 'production';
     res.clearCookie(this.config.getOrThrow<string>('cookies.accessName'), {
-      secure: true,
-      sameSite: 'none',
-      domain,
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+      ...(domain ? { domain } : {}),
       path: '/',
     });
     res.clearCookie(this.config.getOrThrow<string>('cookies.refreshName'), {

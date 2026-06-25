@@ -9,6 +9,7 @@ import { Model } from 'mongoose';
 import { MESSAGES } from '../../common/constants/messages.constants';
 import { User, type UserDocument } from '../../database/schemas';
 import { ChangePasswordDto, UpdateUserDto } from './dto/update-user.dto';
+import { PaginationQueryDto, paginationMeta } from '../../common/dto/pagination-query.dto';
 
 @Injectable()
 export class UsersService {
@@ -22,17 +23,18 @@ export class UsersService {
     return this.toProfile(user);
   }
 
-  async search(query: string, excludeUserId: string) {
+  async search(query: string, excludeUserId: string, pagination: PaginationQueryDto) {
     const term = query.trim();
-    if (term.length < 2) return [];
+    if (term.length < 2) return { items: [], pagination: paginationMeta(pagination, 0) };
 
     const expression = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-    const users = await this.users
-      .find({ id: { $ne: excludeUserId }, $or: [{ name: expression }, { email: expression }] })
-      .limit(8)
-      .exec();
+    const filter = { id: { $ne: excludeUserId }, $or: [{ name: expression }, { email: expression }] };
+    const [users, total] = await Promise.all([
+      this.users.find(filter).skip((pagination.page - 1) * pagination.limit).limit(pagination.limit).exec(),
+      this.users.countDocuments(filter).exec(),
+    ]);
 
-    return users.map((user) => this.toProfile(user));
+    return { items: users.map((user) => this.toProfile(user)), pagination: paginationMeta(pagination, total) };
   }
 
   async updateProfile(userId: string, dto: UpdateUserDto) {

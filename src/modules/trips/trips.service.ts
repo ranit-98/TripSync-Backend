@@ -12,6 +12,7 @@ import {
 } from '../../common/constants/roles.constants';
 import { Trip, TripInvite, TripMember, User } from '../../database/schemas';
 import { NotificationsService } from '../notifications/notifications.service';
+import { PaginationQueryDto, paginationMeta } from '../../common/dto/pagination-query.dto';
 import {
   CreateTripDto,
   InviteMemberDto,
@@ -55,9 +56,8 @@ export class TripsService {
     private readonly notifications: NotificationsService,
   ) {}
 
-  async listForUser(userId: string) {
-    return this.trips
-      .aggregate<Trip>([
+  async listForUser(userId: string, query: PaginationQueryDto) {
+    const pipeline: PipelineStage[] = [
         { $match: { status: 'active' } },
         {
           $lookup: {
@@ -85,10 +85,14 @@ export class TripsService {
           },
         },
         this.defaultCoverStage(),
-        { $sort: { startDate: 1 } },
-        { $project: { _id: 0, requesterMembership: 0 } },
-      ])
-      .exec();
+      { $sort: { startDate: 1 } },
+      { $project: { _id: 0, requesterMembership: 0 } },
+    ];
+    const [items, total] = await Promise.all([
+      this.trips.aggregate<Trip>([...pipeline, { $skip: (query.page - 1) * query.limit }, { $limit: query.limit }]).exec(),
+      this.trips.aggregate<{ total: number }>([...pipeline, { $count: 'total' }]).exec(),
+    ]);
+    return { items, pagination: paginationMeta(query, total[0]?.total ?? 0) };
   }
 
   async create(ownerId: string, dto: CreateTripDto) {
@@ -152,10 +156,13 @@ export class TripsService {
     await this.trips.updateOne({ id: tripId }, { status: 'archived' }).exec();
   }
 
-  listMembers(tripId: string) {
-    return this.tripMembers
-      .aggregate<TripMemberWithUser>(this.membersWithUsersPipeline(tripId))
-      .exec();
+  async listMembers(tripId: string, query: PaginationQueryDto) {
+    const pipeline = this.membersWithUsersPipeline(tripId);
+    const [items, total] = await Promise.all([
+      this.tripMembers.aggregate<TripMemberWithUser>([...pipeline, { $skip: (query.page - 1) * query.limit }, { $limit: query.limit }]).exec(),
+      this.tripMembers.aggregate<{ total: number }>([...pipeline, { $count: 'total' }]).exec(),
+    ]);
+    return { items, pagination: paginationMeta(query, total[0]?.total ?? 0) };
   }
 
   async invite(tripId: string, invitedBy: string, dto: InviteMemberDto) {
@@ -172,9 +179,8 @@ export class TripsService {
     return invite;
   }
 
-  listPendingInvites(userEmail: string) {
-    return this.tripInvites
-      .aggregate<TripInviteWithTrip>([
+  async listPendingInvites(userEmail: string, query: PaginationQueryDto) {
+    const pipeline: PipelineStage[] = [
         {
           $match: {
             email: userEmail.toLowerCase(),
@@ -210,9 +216,13 @@ export class TripsService {
         },
         { $unwind: { path: '$trip', preserveNullAndEmptyArrays: true } },
         { $sort: { createdAt: -1 } },
-        { $project: { _id: 0 } },
-      ])
-      .exec();
+      { $project: { _id: 0 } },
+    ];
+    const [items, total] = await Promise.all([
+      this.tripInvites.aggregate<TripInviteWithTrip>([...pipeline, { $skip: (query.page - 1) * query.limit }, { $limit: query.limit }]).exec(),
+      this.tripInvites.countDocuments({ email: userEmail.toLowerCase(), status: INVITE_STATUSES.PENDING }).exec(),
+    ]);
+    return { items, pagination: paginationMeta(query, total) };
   }
 
   async updateMember(memberId: string, dto: UpdateMemberDto) {
