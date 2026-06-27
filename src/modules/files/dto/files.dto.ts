@@ -1,5 +1,12 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { IsNumber, IsOptional, IsString, IsUrl, Min } from 'class-validator';
+import {
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Min,
+  ValidateIf,
+} from 'class-validator';
 
 export class CreateFolderDto {
   @ApiProperty({ example: 'Hotel bookings' })
@@ -13,6 +20,9 @@ export class CreateFolderDto {
 
   @ApiPropertyOptional({ example: 'parent-folder-id', nullable: true })
   @IsOptional()
+  @ValidateIf(
+    (_object, value) => value !== null && value !== undefined && value !== '',
+  )
   @IsString()
   parentId?: string | null;
 }

@@ -9,7 +9,10 @@ import {
   UpdateDocumentDto,
   UpdateFolderDto,
 } from './dto/files.dto';
-import { PaginationQueryDto, paginationMeta } from '../../common/dto/pagination-query.dto';
+import {
+  PaginationQueryDto,
+  paginationMeta,
+} from '../../common/dto/pagination-query.dto';
 
 @Injectable()
 export class FilesService {
@@ -21,19 +24,33 @@ export class FilesService {
 
   async foldersForTrip(tripId: string, query: PaginationQueryDto) {
     const [items, total] = await Promise.all([
-      this.folders.find({ tripId }).sort({ createdAt: -1 }).skip((query.page - 1) * query.limit).limit(query.limit).lean().exec(),
+      this.folders
+        .find({ tripId })
+        .sort({ createdAt: -1 })
+        .skip((query.page - 1) * query.limit)
+        .limit(query.limit)
+        .lean()
+        .exec(),
       this.folders.countDocuments({ tripId }).exec(),
     ]);
     return { items, pagination: paginationMeta(query, total) };
   }
 
   async createFolder(tripId: string, userId: string, dto: CreateFolderDto) {
-    if (dto.parentId) {
-      const parent = await this.folders.exists({ id: dto.parentId, tripId });
+    const parentId =
+      typeof dto.parentId === 'string' ? dto.parentId.trim() || null : null;
+
+    if (parentId) {
+      const parent = await this.folders.exists({ id: parentId, tripId });
       if (!parent) throw new NotFoundException(MESSAGES.COMMON.NOT_FOUND);
     }
 
-    return this.folders.create({ ...dto, parentId: dto.parentId || null, tripId, createdBy: userId });
+    return this.folders.create({
+      ...dto,
+      parentId,
+      tripId,
+      createdBy: userId,
+    });
   }
 
   updateFolder(folderId: string, dto: UpdateFolderDto) {
@@ -65,7 +82,13 @@ export class FilesService {
 
   async documentsForFolder(folderId: string, query: PaginationQueryDto) {
     const [items, total] = await Promise.all([
-      this.documents.find({ folderId }).sort({ createdAt: -1 }).skip((query.page - 1) * query.limit).limit(query.limit).lean().exec(),
+      this.documents
+        .find({ folderId })
+        .sort({ createdAt: -1 })
+        .skip((query.page - 1) * query.limit)
+        .limit(query.limit)
+        .lean()
+        .exec(),
       this.documents.countDocuments({ folderId }).exec(),
     ]);
     return { items, pagination: paginationMeta(query, total) };

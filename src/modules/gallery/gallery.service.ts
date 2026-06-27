@@ -1,10 +1,13 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Photo, Trip, TripMember } from '../../database/schemas';
 import { UploadsService } from '../uploads/uploads.service';
 import { CreatePhotoDto, UpdatePhotoDto } from './dto/gallery.dto';
-import { PaginationQueryDto, paginationMeta } from '../../common/dto/pagination-query.dto';
+import {
+  PaginationQueryDto,
+  paginationMeta,
+} from '../../common/dto/pagination-query.dto';
 
 @Injectable()
 export class GalleryService {
@@ -20,7 +23,13 @@ export class GalleryService {
 
   async list(tripId: string, query: PaginationQueryDto) {
     const [items, total] = await Promise.all([
-      this.photos.find({ tripId }).sort({ createdAt: -1 }).skip((query.page - 1) * query.limit).limit(query.limit).lean().exec(),
+      this.photos
+        .find({ tripId })
+        .sort({ createdAt: -1 })
+        .skip((query.page - 1) * query.limit)
+        .limit(query.limit)
+        .lean()
+        .exec(),
       this.photos.countDocuments({ tripId }).exec(),
     ]);
     return { items, pagination: paginationMeta(query, total) };
@@ -29,7 +38,12 @@ export class GalleryService {
   async album(tripId: string) {
     const [trip, photos, photoCount] = await Promise.all([
       this.trips.findOne({ id: tripId }).lean().exec(),
-      this.photos.find({ tripId }).sort({ createdAt: -1 }).limit(1).lean().exec(),
+      this.photos
+        .find({ tripId })
+        .sort({ createdAt: -1 })
+        .limit(1)
+        .lean()
+        .exec(),
       this.photos.countDocuments({ tripId }).exec(),
     ]);
 
@@ -46,16 +60,43 @@ export class GalleryService {
     tripId: string,
     userId: string,
     dto: CreatePhotoDto,
+    file?: Express.Multer.File,
   ) {
+    if (file) {
+      const image = await this.uploads.uploadImageAsset(
+        file,
+        `trips/${tripId}/photos`,
+      );
+
+      return this.photos.create({
+        tripId,
+        uploadedBy: userId,
+        caption: dto.caption?.trim() || null,
+        objectKey: image.objectKey,
+        url: image.url,
+        originalFileName: file.originalname,
+        mimeType: file.mimetype,
+        size: file.size,
+      });
+    }
+
+    const { objectKey, url, originalFileName, mimeType, size } = dto;
+
+    if (!objectKey || !url || !originalFileName || !mimeType || size == null) {
+      throw new BadRequestException(
+        'Image file or uploaded image metadata is required.',
+      );
+    }
+
     return this.photos.create({
       tripId,
       uploadedBy: userId,
       caption: dto.caption?.trim() || null,
-      objectKey: dto.objectKey,
-      url: dto.url,
-      originalFileName: dto.originalFileName,
-      mimeType: dto.mimeType,
-      size: dto.size,
+      objectKey,
+      url,
+      originalFileName,
+      mimeType,
+      size,
     });
   }
 
@@ -80,7 +121,7 @@ export class GalleryService {
     } catch (error) {
       this.logger.warn(
         `Failed to delete Cloudinary image ${photo.objectKey}: ${
-          error instanceof Error ? error.message : error
+          error instanceof Error ? error.message : String(error)
         }`,
       );
     }
@@ -135,7 +176,15 @@ export class GalleryService {
         photoCount: photoSummary?.photoCount || 0,
       };
     });
-    const total = await this.trips.countDocuments({ status: 'active', $or: [{ ownerId: userId }, { id: { $in: memberships.map((membership) => membership.tripId) } }] }).exec();
+    const total = await this.trips
+      .countDocuments({
+        status: 'active',
+        $or: [
+          { ownerId: userId },
+          { id: { $in: memberships.map((membership) => membership.tripId) } },
+        ],
+      })
+      .exec();
     return { items, pagination: paginationMeta(query, total) };
   }
 }

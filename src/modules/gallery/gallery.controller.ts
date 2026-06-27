@@ -7,9 +7,13 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiBody } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBody, ApiConsumes } from '@nestjs/swagger';
+import { memoryStorage } from 'multer';
 import { MESSAGES } from '../../common/constants/messages.constants';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { TripRoles } from '../../common/decorators/trip-roles.decorator';
@@ -20,6 +24,7 @@ import { TRIP_MEMBER_ROLES } from '../../common/constants/roles.constants';
 import { CreatePhotoDto, UpdatePhotoDto } from './dto/gallery.dto';
 import { GalleryService } from './gallery.service';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { MAX_IMAGE_BYTES } from '../uploads/uploads.service';
 
 @Controller()
 @UseGuards(JwtAuthGuard)
@@ -27,7 +32,10 @@ export class GalleryController {
   constructor(private readonly gallery: GalleryService) {}
 
   @Get('albums')
-  async albums(@CurrentUser() user: RequestUser, @Query() query: PaginationQueryDto) {
+  async albums(
+    @CurrentUser() user: RequestUser,
+    @Query() query: PaginationQueryDto,
+  ) {
     const result = await this.gallery.albums(user.id, query);
     return {
       message: MESSAGES.GALLERY.ALBUMS,
@@ -47,7 +55,10 @@ export class GalleryController {
 
   @Get('trips/:tripId/photos')
   @UseGuards(TripMemberGuard)
-  async list(@Param('tripId') tripId: string, @Query() query: PaginationQueryDto) {
+  async list(
+    @Param('tripId') tripId: string,
+    @Query() query: PaginationQueryDto,
+  ) {
     const result = await this.gallery.list(tripId, query);
     return {
       message: MESSAGES.GALLERY.LISTED,
@@ -59,15 +70,23 @@ export class GalleryController {
   @Post('trips/:tripId/photos')
   @UseGuards(TripMemberGuard)
   @TripRoles(TRIP_MEMBER_ROLES.COLLABORATOR)
+  @UseInterceptors(
+    FileInterceptor('image', {
+      storage: memoryStorage(),
+      limits: { fileSize: MAX_IMAGE_BYTES, files: 1 },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
   @ApiBody({ type: CreatePhotoDto })
   async create(
     @Param('tripId') tripId: string,
     @CurrentUser() user: RequestUser,
     @Body() dto: CreatePhotoDto,
+    @UploadedFile() file?: Express.Multer.File,
   ) {
     return {
       message: MESSAGES.GALLERY.CREATED,
-      data: await this.gallery.create(tripId, user.id, dto),
+      data: await this.gallery.create(tripId, user.id, dto, file),
     };
   }
 
