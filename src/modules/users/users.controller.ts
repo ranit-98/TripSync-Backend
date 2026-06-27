@@ -41,6 +41,13 @@ export class UsersController {
     };
   }
 
+  @Get('me/travel-stats')
+  async travelStats(@CurrentUser() user: RequestUser) {
+    return {
+      data: await this.users.travelStats(user.id),
+    };
+  }
+
   @Patch('me')
   @ApiBody({ type: UpdateUserDto })
   async updateMe(

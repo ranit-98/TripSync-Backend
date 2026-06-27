@@ -7,13 +7,17 @@ import { InjectModel } from '@nestjs/mongoose';
 import * as bcrypt from 'bcrypt';
 import { Model } from 'mongoose';
 import { MESSAGES } from '../../common/constants/messages.constants';
-import { User, type UserDocument } from '../../database/schemas';
+import { Trip, TripMember, User, type UserDocument } from '../../database/schemas';
 import { ChangePasswordDto, UpdateUserDto } from './dto/update-user.dto';
 import { PaginationQueryDto, paginationMeta } from '../../common/dto/pagination-query.dto';
 
 @Injectable()
 export class UsersService {
-  constructor(@InjectModel(User.name) private readonly users: Model<User>) {}
+  constructor(
+    @InjectModel(TripMember.name) private readonly members: Model<TripMember>,
+    @InjectModel(Trip.name) private readonly trips: Model<Trip>,
+    @InjectModel(User.name) private readonly users: Model<User>,
+  ) {}
 
   async findProfile(userId: string) {
     const user = await this.users.findOne({ id: userId }).exec();
@@ -40,6 +44,33 @@ export class UsersService {
   async updateProfile(userId: string, dto: UpdateUserDto) {
     await this.users.updateOne({ id: userId }, dto).exec();
     return this.findProfile(userId);
+  }
+
+  async travelStats(userId: string) {
+    const membership = await this.members.find({ userId }).lean().exec();
+    const tripIds = membership.map((member) => member.tripId);
+
+    if (!tripIds.length) {
+      return { destinationsSaved: 0, tripsPlanned: 0, upcomingTrips: 0 };
+    }
+
+    const now = new Date();
+    const trips = await this.trips
+      .find({ id: { $in: tripIds }, status: 'active' })
+      .select({ destination: 1, startDate: 1 })
+      .lean()
+      .exec();
+    const destinations = new Set(
+      trips
+        .map((trip) => trip.destination?.trim().toLowerCase())
+        .filter(Boolean),
+    );
+
+    return {
+      destinationsSaved: destinations.size,
+      tripsPlanned: trips.length,
+      upcomingTrips: trips.filter((trip) => trip.startDate > now).length,
+    };
   }
 
   async changePassword(userId: string, dto: ChangePasswordDto) {
