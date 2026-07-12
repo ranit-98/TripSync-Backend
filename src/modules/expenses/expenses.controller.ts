@@ -17,7 +17,10 @@ import { TripMemberGuard } from '../../common/guards/trip-member.guard';
 import { TRIP_MEMBER_ROLES } from '../../common/constants/roles.constants';
 import { CreateExpenseDto, UpdateExpenseDto } from './dto/expense.dto';
 import { ExpensesService } from './expenses.service';
-import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import {
+  ExpenseListQueryDto,
+  PaginationQueryDto,
+} from '../../common/dto/pagination-query.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { RequestUser } from '../../common/types/request-user.type';
 
@@ -27,7 +30,10 @@ export class ExpensesController {
   constructor(private readonly expenses: ExpensesService) {}
 
   @Get('expenses')
-  async list(@Param('tripId') tripId: string, @Query() query: PaginationQueryDto) {
+  async list(
+    @Param('tripId') tripId: string,
+    @Query() query: ExpenseListQueryDto,
+  ) {
     const result = await this.expenses.list(tripId, query);
     return {
       message: MESSAGES.EXPENSES.LISTED,
@@ -82,7 +88,10 @@ export class ExpensesController {
   }
 
   @Get('settlements')
-  async settlements(@Param('tripId') tripId: string, @Query() query: PaginationQueryDto) {
+  async settlements(
+    @Param('tripId') tripId: string,
+    @Query() query: PaginationQueryDto,
+  ) {
     const result = await this.expenses.settlementsSummary(tripId, query);
     return {
       message: MESSAGES.EXPENSES.SETTLEMENTS,
@@ -92,7 +101,11 @@ export class ExpensesController {
   }
 
   @Post('settlements/:settlementId/declare-paid')
-  async declarePaid(@Param('tripId') tripId: string, @Param('settlementId') settlementId: string, @CurrentUser() user: RequestUser) {
+  async declarePaid(
+    @Param('tripId') tripId: string,
+    @Param('settlementId') settlementId: string,
+    @CurrentUser() user: RequestUser,
+  ) {
     return {
       message: 'Payment declaration sent for confirmation.',
       data: await this.expenses.declarePaid(tripId, settlementId, user.id),
@@ -100,12 +113,23 @@ export class ExpensesController {
   }
 
   @Post('settlements/:settlementId/confirm-paid')
-  async confirmPaid(@Param('tripId') tripId: string, @Param('settlementId') settlementId: string, @CurrentUser() user: RequestUser) {
-    return { message: MESSAGES.EXPENSES.SETTLED, data: await this.expenses.confirmPaid(tripId, settlementId, user.id) };
+  async confirmPaid(
+    @Param('tripId') tripId: string,
+    @Param('settlementId') settlementId: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return {
+      message: MESSAGES.EXPENSES.SETTLED,
+      data: await this.expenses.confirmPaid(tripId, settlementId, user.id),
+    };
   }
 
   @Post('settlements/:settlementId/reminder')
-  async reminder(@Param('tripId') tripId: string, @Param('settlementId') settlementId: string, @CurrentUser() user: RequestUser) {
+  async reminder(
+    @Param('tripId') tripId: string,
+    @Param('settlementId') settlementId: string,
+    @CurrentUser() user: RequestUser,
+  ) {
     await this.expenses.sendReminder(tripId, settlementId, user.id);
     return { message: MESSAGES.EXPENSES.REMINDER_SENT };
   }

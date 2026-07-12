@@ -12,7 +12,10 @@ import {
 } from '../../common/constants/roles.constants';
 import { Message, MessageAttachment, User } from '../../database/schemas';
 import { CreateAttachmentDto, CreateMessageDto } from './dto/chat.dto';
-import { PaginationQueryDto, paginationMeta } from '../../common/dto/pagination-query.dto';
+import {
+  PaginationQueryDto,
+  paginationMeta,
+} from '../../common/dto/pagination-query.dto';
 
 type MessageReadModel = Message & {
   sender: User | null;
@@ -30,7 +33,15 @@ export class ChatService {
   async history(tripId: string, query: PaginationQueryDto) {
     const pipeline = this.messageReadPipeline({ tripId });
     const [items, total] = await Promise.all([
-      this.messages.aggregate<MessageReadModel>([...pipeline, { $skip: (query.page - 1) * query.limit }, { $limit: query.limit }]).exec(),
+      this.messages
+        .aggregate<MessageReadModel>([
+          ...pipeline,
+          { $sort: { createdAt: -1 } },
+          { $skip: (query.page - 1) * query.limit },
+          { $limit: query.limit },
+          { $sort: { createdAt: 1 } },
+        ])
+        .exec(),
       this.messages.countDocuments({ tripId }).exec(),
     ]);
     return { items, pagination: paginationMeta(query, total) };

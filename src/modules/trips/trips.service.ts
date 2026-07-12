@@ -12,7 +12,11 @@ import {
 } from '../../common/constants/roles.constants';
 import { Trip, TripInvite, TripMember, User } from '../../database/schemas';
 import { NotificationsService } from '../notifications/notifications.service';
-import { PaginationQueryDto, paginationMeta } from '../../common/dto/pagination-query.dto';
+import {
+  PaginationQueryDto,
+  SearchPaginationQueryDto,
+  paginationMeta,
+} from '../../common/dto/pagination-query.dto';
 import {
   CreateTripDto,
   InviteMemberDto,
@@ -56,41 +60,72 @@ export class TripsService {
     private readonly notifications: NotificationsService,
   ) {}
 
-  async listForUser(userId: string, query: PaginationQueryDto) {
+  async listForUser(userId: string, query: SearchPaginationQueryDto) {
+    const search = query.search?.trim();
     const pipeline: PipelineStage[] = [
-        { $match: { status: 'active' } },
-        {
-          $lookup: {
-            from: 'trip_members',
-            let: { tripId: '$id' },
-            pipeline: [
-              {
-                $match: {
-                  $expr: {
-                    $and: [
-                      { $eq: ['$tripId', '$$tripId'] },
-                      { $eq: ['$userId', userId] },
-                    ],
+      { $match: { status: 'active' } },
+      ...(search
+        ? [
+            {
+              $match: {
+                $or: [
+                  {
+                    title: {
+                      $regex: search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+                      $options: 'i',
+                    },
                   },
+                  {
+                    destination: {
+                      $regex: search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+                      $options: 'i',
+                    },
+                  },
+                ],
+              },
+            } as PipelineStage,
+          ]
+        : []),
+      {
+        $lookup: {
+          from: 'trip_members',
+          let: { tripId: '$id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ['$tripId', '$$tripId'] },
+                    { $eq: ['$userId', userId] },
+                  ],
                 },
               },
-              { $project: { _id: 0, id: 1 } },
-            ],
-            as: 'requesterMembership',
-          },
+            },
+            { $project: { _id: 0, id: 1 } },
+          ],
+          as: 'requesterMembership',
         },
-        {
-          $match: {
-            $or: [{ ownerId: userId }, { requesterMembership: { $ne: [] } }],
-          },
+      },
+      {
+        $match: {
+          $or: [{ ownerId: userId }, { requesterMembership: { $ne: [] } }],
         },
-        this.defaultCoverStage(),
+      },
+      this.defaultCoverStage(),
       { $sort: { startDate: 1 } },
       { $project: { _id: 0, requesterMembership: 0 } },
     ];
     const [items, total] = await Promise.all([
-      this.trips.aggregate<Trip>([...pipeline, { $skip: (query.page - 1) * query.limit }, { $limit: query.limit }]).exec(),
-      this.trips.aggregate<{ total: number }>([...pipeline, { $count: 'total' }]).exec(),
+      this.trips
+        .aggregate<Trip>([
+          ...pipeline,
+          { $skip: (query.page - 1) * query.limit },
+          { $limit: query.limit },
+        ])
+        .exec(),
+      this.trips
+        .aggregate<{ total: number }>([...pipeline, { $count: 'total' }])
+        .exec(),
     ]);
     return { items, pagination: paginationMeta(query, total[0]?.total ?? 0) };
   }
@@ -159,8 +194,16 @@ export class TripsService {
   async listMembers(tripId: string, query: PaginationQueryDto) {
     const pipeline = this.membersWithUsersPipeline(tripId);
     const [items, total] = await Promise.all([
-      this.tripMembers.aggregate<TripMemberWithUser>([...pipeline, { $skip: (query.page - 1) * query.limit }, { $limit: query.limit }]).exec(),
-      this.tripMembers.aggregate<{ total: number }>([...pipeline, { $count: 'total' }]).exec(),
+      this.tripMembers
+        .aggregate<TripMemberWithUser>([
+          ...pipeline,
+          { $skip: (query.page - 1) * query.limit },
+          { $limit: query.limit },
+        ])
+        .exec(),
+      this.tripMembers
+        .aggregate<{ total: number }>([...pipeline, { $count: 'total' }])
+        .exec(),
     ]);
     return { items, pagination: paginationMeta(query, total[0]?.total ?? 0) };
   }
@@ -181,46 +224,57 @@ export class TripsService {
 
   async listPendingInvites(userEmail: string, query: PaginationQueryDto) {
     const pipeline: PipelineStage[] = [
-        {
-          $match: {
-            email: userEmail.toLowerCase(),
-            status: INVITE_STATUSES.PENDING,
-          },
+      {
+        $match: {
+          email: userEmail.toLowerCase(),
+          status: INVITE_STATUSES.PENDING,
         },
-        {
-          $lookup: {
-            from: 'trips',
-            localField: 'tripId',
-            foreignField: 'id',
-            pipeline: [
-              { $match: { status: 'active' } },
-              {
-                $project: {
-                  _id: 0,
-                  id: 1,
-                  title: 1,
-                  destination: 1,
-                  startDate: 1,
-                  endDate: 1,
-                  currency: 1,
-                  budget: 1,
-                  coverUrl: 1,
-                  styles: 1,
-                  createdAt: 1,
-                  updatedAt: 1,
-                },
+      },
+      {
+        $lookup: {
+          from: 'trips',
+          localField: 'tripId',
+          foreignField: 'id',
+          pipeline: [
+            { $match: { status: 'active' } },
+            {
+              $project: {
+                _id: 0,
+                id: 1,
+                title: 1,
+                destination: 1,
+                startDate: 1,
+                endDate: 1,
+                currency: 1,
+                budget: 1,
+                coverUrl: 1,
+                styles: 1,
+                createdAt: 1,
+                updatedAt: 1,
               },
-            ],
-            as: 'trip',
-          },
+            },
+          ],
+          as: 'trip',
         },
-        { $unwind: { path: '$trip', preserveNullAndEmptyArrays: true } },
-        { $sort: { createdAt: -1 } },
+      },
+      { $unwind: { path: '$trip', preserveNullAndEmptyArrays: true } },
+      { $sort: { createdAt: -1 } },
       { $project: { _id: 0 } },
     ];
     const [items, total] = await Promise.all([
-      this.tripInvites.aggregate<TripInviteWithTrip>([...pipeline, { $skip: (query.page - 1) * query.limit }, { $limit: query.limit }]).exec(),
-      this.tripInvites.countDocuments({ email: userEmail.toLowerCase(), status: INVITE_STATUSES.PENDING }).exec(),
+      this.tripInvites
+        .aggregate<TripInviteWithTrip>([
+          ...pipeline,
+          { $skip: (query.page - 1) * query.limit },
+          { $limit: query.limit },
+        ])
+        .exec(),
+      this.tripInvites
+        .countDocuments({
+          email: userEmail.toLowerCase(),
+          status: INVITE_STATUSES.PENDING,
+        })
+        .exec(),
     ]);
     return { items, pagination: paginationMeta(query, total) };
   }
@@ -270,7 +324,7 @@ export class TripsService {
     await this.tripInvites
       .updateOne({ id: invite.id }, { status: INVITE_STATUSES.ACCEPTED })
       .exec();
-    await this.notifications.deleteForResource(userId, 'trip_invite', invite.id);
+    await this.notifications.deleteForResource(userId, 'trip_invite', inviteId);
     await this.notifyTripMembers(
       invite.tripId,
       userId,
@@ -287,9 +341,16 @@ export class TripsService {
     await this.tripInvites
       .updateOne({ id: invite.id }, { status: INVITE_STATUSES.DECLINED })
       .exec();
-    const invitee = await this.users.findOne({ email: invite.email }).lean().exec();
+    const invitee = await this.users
+      .findOne({ email: invite.email })
+      .lean()
+      .exec();
     if (invitee) {
-      await this.notifications.deleteForResource(invitee.id, 'trip_invite', invite.id);
+      await this.notifications.deleteForResource(
+        invitee.id,
+        'trip_invite',
+        inviteId,
+      );
     }
     await this.notifyTripMembers(
       invite.tripId,
@@ -299,8 +360,14 @@ export class TripsService {
     );
   }
 
-  private async createInviteNotification(invite: TripInvite, trip: Trip | null) {
-    const invitee = await this.users.findOne({ email: invite.email }).lean().exec();
+  private async createInviteNotification(
+    invite: TripInvite,
+    trip: Trip | null,
+  ) {
+    const invitee = await this.users
+      .findOne({ email: invite.email })
+      .lean()
+      .exec();
     if (!invitee) return;
 
     await this.notifications.createForUser(invitee.id, {
@@ -323,17 +390,25 @@ export class TripsService {
       this.trips.findOne({ id: tripId }).lean().exec(),
       this.tripMembers.find({ tripId }).lean().exec(),
     ]);
-    const recipientIds = [...new Set(members.map((member) => member.userId).filter((userId) => userId !== actorId))];
+    const recipientIds = [
+      ...new Set(
+        members
+          .map((member) => member.userId)
+          .filter((userId) => userId !== actorId),
+      ),
+    ];
 
     await Promise.all(
-      recipientIds.map((userId) => this.notifications.createForUser(userId, {
-        body,
-        resourceId: tripId,
-        resourceType: 'trip',
-        title: trip?.title ?? 'Trip activity',
-        tripId,
-        type,
-      })),
+      recipientIds.map((userId) =>
+        this.notifications.createForUser(userId, {
+          body,
+          resourceId: tripId,
+          resourceType: 'trip',
+          title: trip?.title ?? 'Trip activity',
+          tripId,
+          type,
+        }),
+      ),
     );
   }
 

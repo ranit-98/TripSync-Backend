@@ -12,7 +12,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import type { RequestUser } from '../../common/types/request-user.type';
 import { NotificationsService } from './notifications.service';
-import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { NotificationListQueryDto } from '../../common/dto/pagination-query.dto';
 
 @Controller('notifications')
 @UseGuards(JwtAuthGuard)
@@ -20,12 +20,16 @@ export class NotificationsController {
   constructor(private readonly notifications: NotificationsService) {}
 
   @Get()
-  async list(@CurrentUser() user: RequestUser, @Query() query: PaginationQueryDto) {
+  async list(
+    @CurrentUser() user: RequestUser,
+    @Query() query: NotificationListQueryDto,
+  ) {
     const result = await this.notifications.list(user.id, query);
     return {
       message: MESSAGES.NOTIFICATIONS.LISTED,
       data: result.items,
       pagination: result.pagination,
+      notificationCounts: result.counts,
     };
   }
 
