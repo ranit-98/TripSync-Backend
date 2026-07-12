@@ -39,6 +39,7 @@ export class ExpensesController {
       message: MESSAGES.EXPENSES.LISTED,
       data: result.items,
       pagination: result.pagination,
+      summary: result.summary,
     };
   }
 

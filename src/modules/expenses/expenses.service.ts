@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -48,7 +49,7 @@ export class ExpensesService {
       ...(query.category ? { category: query.category } : {}),
     };
     const pipeline = this.expenseReadPipeline(filter);
-    const [items, total] = await Promise.all([
+    const [items, total, summary] = await Promise.all([
       this.expenses
         .aggregate<ExpenseReadModel>([
           ...pipeline,
@@ -57,11 +58,26 @@ export class ExpensesService {
         ])
         .exec(),
       this.expenses.countDocuments(filter).exec(),
+      this.expenses
+        .aggregate<{
+          totalAmount: number;
+        }>([
+          { $match: filter },
+          { $group: { _id: null, totalAmount: { $sum: '$amount' } } },
+          { $project: { _id: 0, totalAmount: 1 } },
+        ])
+        .exec(),
     ]);
-    return { items, pagination: paginationMeta(query, total) };
+    return {
+      items,
+      pagination: paginationMeta(query, total),
+      summary: { totalAmount: summary[0]?.totalAmount ?? 0 },
+    };
   }
 
   async create(tripId: string, dto: CreateExpenseDto) {
+    this.assertValidSplitTotal(dto.amount, dto.splits);
+
     const expense = await this.expenses.create({
       description: dto.description,
       category: dto.category,
@@ -98,7 +114,10 @@ export class ExpensesService {
   }
 
   async update(tripId: string, expenseId: string, dto: UpdateExpenseDto) {
-    await this.find(tripId, expenseId);
+    const existingExpense = await this.find(tripId, expenseId);
+    const effectiveSplits = dto.splits ?? existingExpense.splits;
+    const effectiveAmount = dto.amount ?? existingExpense.amount;
+    this.assertValidSplitTotal(effectiveAmount, effectiveSplits);
 
     const update = {
       description: dto.description,
@@ -209,7 +228,12 @@ export class ExpensesService {
         id: settlementId,
         tripId,
         toUserId: userId,
-        status: SETTLEMENT_STATUSES.PAYMENT_DECLARED,
+        status: {
+          $in: [
+            SETTLEMENT_STATUSES.PENDING,
+            SETTLEMENT_STATUSES.PAYMENT_DECLARED,
+          ],
+        },
       })
       .exec();
     if (!settlement)
@@ -328,6 +352,34 @@ export class ExpensesService {
 
     if (settlements.length) {
       await this.settlements.insertMany(settlements);
+    }
+  }
+
+  private assertValidSplitTotal(
+    expenseAmount: number,
+    splits: Array<{ amount: number; userId: string }>,
+  ) {
+    if (!splits.length) {
+      throw new BadRequestException('At least one expense split is required.');
+    }
+
+    const uniqueUserIds = new Set(splits.map((split) => split.userId));
+    if (uniqueUserIds.size !== splits.length) {
+      throw new BadRequestException(
+        'Each member can only appear once in a split.',
+      );
+    }
+
+    const expenseInCents = Math.round(expenseAmount * 100);
+    const splitTotalInCents = splits.reduce(
+      (total, split) => total + Math.round(split.amount * 100),
+      0,
+    );
+
+    if (splitTotalInCents !== expenseInCents) {
+      throw new BadRequestException(
+        'Expense split amounts must add up to the exact expense total.',
+      );
     }
   }
 
