@@ -1,4 +1,12 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { createHmac, timingSafeEqual } from 'crypto';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage } from 'mongoose';
 import { MESSAGES } from '../../common/constants/messages.constants';
@@ -7,11 +15,19 @@ import {
   Expense,
   ExpenseSplit,
   Settlement,
+  Trip,
   type User,
 } from '../../database/schemas';
-import { CreateExpenseDto, UpdateExpenseDto } from './dto/expense.dto';
+import {
+  CreateExpenseDto,
+  UpdateExpenseDto,
+  VerifyRazorpaySettlementDto,
+} from './dto/expense.dto';
 import { NotificationsService } from '../notifications/notifications.service';
-import { PaginationQueryDto, paginationMeta } from '../../common/dto/pagination-query.dto';
+import {
+  PaginationQueryDto,
+  paginationMeta,
+} from '../../common/dto/pagination-query.dto';
 
 type ExpenseReadModel = Expense & {
   splits: Array<ExpenseSplit & { user: User | null }>;
@@ -23,6 +39,14 @@ type SettlementReadModel = Settlement & {
   toUser: User | null;
 };
 
+type RazorpayOrderResponse = {
+  amount: number;
+  currency: string;
+  id: string;
+  receipt: string;
+  status: string;
+};
+
 @Injectable()
 export class ExpensesService {
   constructor(
@@ -31,13 +55,21 @@ export class ExpensesService {
     private readonly expenseSplits: Model<ExpenseSplit>,
     @InjectModel(Settlement.name)
     private readonly settlements: Model<Settlement>,
+    @InjectModel(Trip.name) private readonly trips: Model<Trip>,
+    private readonly config: ConfigService,
     private readonly notifications: NotificationsService,
   ) {}
 
   async list(tripId: string, query: PaginationQueryDto) {
     const pipeline = this.expenseReadPipeline({ tripId });
     const [items, total] = await Promise.all([
-      this.expenses.aggregate<ExpenseReadModel>([...pipeline, { $skip: (query.page - 1) * query.limit }, { $limit: query.limit }]).exec(),
+      this.expenses
+        .aggregate<ExpenseReadModel>([
+          ...pipeline,
+          { $skip: (query.page - 1) * query.limit },
+          { $limit: query.limit },
+        ])
+        .exec(),
       this.expenses.countDocuments({ tripId }).exec(),
     ]);
     return { items, pagination: paginationMeta(query, total) };
@@ -120,61 +152,223 @@ export class ExpensesService {
 
   async settlementsSummary(tripId: string, query: PaginationQueryDto) {
     const pipeline: PipelineStage[] = [
-        { $match: { tripId } },
-        {
-          $sort: { status: 1, amount: -1 },
+      { $match: { tripId } },
+      {
+        $sort: { status: 1, amount: -1 },
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'fromUserId',
+          foreignField: 'id',
+          pipeline: [this.publicUserProject()],
+          as: 'fromUser',
         },
-        {
-          $lookup: {
-            from: 'users',
-            localField: 'fromUserId',
-            foreignField: 'id',
-            pipeline: [this.publicUserProject()],
-            as: 'fromUser',
-          },
+      },
+      { $unwind: { path: '$fromUser', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'toUserId',
+          foreignField: 'id',
+          pipeline: [this.publicUserProject()],
+          as: 'toUser',
         },
-        { $unwind: { path: '$fromUser', preserveNullAndEmptyArrays: true } },
-        {
-          $lookup: {
-            from: 'users',
-            localField: 'toUserId',
-            foreignField: 'id',
-            pipeline: [this.publicUserProject()],
-            as: 'toUser',
-          },
-        },
-        { $unwind: { path: '$toUser', preserveNullAndEmptyArrays: true } },
+      },
+      { $unwind: { path: '$toUser', preserveNullAndEmptyArrays: true } },
       { $project: { _id: 0 } },
     ];
     const [items, total] = await Promise.all([
-      this.settlements.aggregate<SettlementReadModel>([...pipeline, { $skip: (query.page - 1) * query.limit }, { $limit: query.limit }]).exec(),
+      this.settlements
+        .aggregate<SettlementReadModel>([
+          ...pipeline,
+          { $skip: (query.page - 1) * query.limit },
+          { $limit: query.limit },
+        ])
+        .exec(),
       this.settlements.countDocuments({ tripId }).exec(),
     ]);
     return { items, pagination: paginationMeta(query, total) };
   }
 
   async declarePaid(tripId: string, settlementId: string, userId: string) {
-    const settlement = await this.settlements.findOne({ id: settlementId, tripId, fromUserId: userId, status: SETTLEMENT_STATUSES.PENDING }).exec();
-    if (!settlement) throw new ForbiddenException('Only the member who owes this amount can declare payment.');
+    const settlement = await this.settlements
+      .findOne({
+        id: settlementId,
+        tripId,
+        fromUserId: userId,
+        status: SETTLEMENT_STATUSES.PENDING,
+      })
+      .exec();
+    if (!settlement)
+      throw new ForbiddenException(
+        'Only the member who owes this amount can declare payment.',
+      );
     settlement.status = SETTLEMENT_STATUSES.PAYMENT_DECLARED;
     await settlement.save();
-    await this.notifications.createForUser(settlement.toUserId, { tripId, type: 'settlement_payment_declared', title: 'Payment awaiting your confirmation', body: `A trip member declared payment of ${settlement.amount}. Confirm after you receive it.`, resourceType: 'settlement', resourceId: settlement.id });
+    await this.notifications.createForUser(settlement.toUserId, {
+      tripId,
+      type: 'settlement_payment_declared',
+      title: 'Payment awaiting your confirmation',
+      body: `A trip member declared payment of ${settlement.amount}. Confirm after you receive it.`,
+      resourceType: 'settlement',
+      resourceId: settlement.id,
+    });
     return settlement;
   }
 
   async confirmPaid(tripId: string, settlementId: string, userId: string) {
-    const settlement = await this.settlements.findOne({ id: settlementId, tripId, toUserId: userId, status: SETTLEMENT_STATUSES.PAYMENT_DECLARED }).exec();
-    if (!settlement) throw new ForbiddenException('Only the member receiving this payment can confirm it.');
+    const settlement = await this.settlements
+      .findOne({
+        id: settlementId,
+        tripId,
+        toUserId: userId,
+        status: SETTLEMENT_STATUSES.PAYMENT_DECLARED,
+      })
+      .exec();
+    if (!settlement)
+      throw new ForbiddenException(
+        'Only the member receiving this payment can confirm it.',
+      );
     settlement.status = SETTLEMENT_STATUSES.PAID;
     await settlement.save();
-    await this.notifications.createForUser(settlement.fromUserId, { tripId, type: 'settlement_payment_confirmed', title: 'Payment confirmed', body: `Your payment of ${settlement.amount} was confirmed.`, resourceType: 'settlement', resourceId: settlement.id });
+    await this.notifications.createForUser(settlement.fromUserId, {
+      tripId,
+      type: 'settlement_payment_confirmed',
+      title: 'Payment confirmed',
+      body: `Your payment of ${settlement.amount} was confirmed.`,
+      resourceType: 'settlement',
+      resourceId: settlement.id,
+    });
     return settlement;
   }
 
   async sendReminder(tripId: string, settlementId: string, userId: string) {
-    const settlement = await this.settlements.findOne({ id: settlementId, tripId, toUserId: userId, status: SETTLEMENT_STATUSES.PENDING }).exec();
-    if (!settlement) throw new ForbiddenException('Only the person owed can send a reminder.');
-    await this.notifications.createForUser(settlement.fromUserId, { tripId, type: 'settlement_reminder', title: 'Settlement reminder', body: `You still owe ${settlement.amount} for this trip.`, resourceType: 'settlement', resourceId: settlement.id });
+    const settlement = await this.settlements
+      .findOne({
+        id: settlementId,
+        tripId,
+        toUserId: userId,
+        status: SETTLEMENT_STATUSES.PENDING,
+      })
+      .exec();
+    if (!settlement)
+      throw new ForbiddenException('Only the person owed can send a reminder.');
+    await this.notifications.createForUser(settlement.fromUserId, {
+      tripId,
+      type: 'settlement_reminder',
+      title: 'Settlement reminder',
+      body: `You still owe ${settlement.amount} for this trip.`,
+      resourceType: 'settlement',
+      resourceId: settlement.id,
+    });
+    return settlement;
+  }
+
+  async createRazorpaySettlementOrder(
+    tripId: string,
+    settlementId: string,
+    userId: string,
+  ) {
+    const settlement = await this.settlements
+      .findOne({
+        id: settlementId,
+        tripId,
+        fromUserId: userId,
+        status: SETTLEMENT_STATUSES.PENDING,
+      })
+      .exec();
+    if (!settlement) {
+      throw new ForbiddenException(
+        'Only the member who owes this amount can pay this settlement.',
+      );
+    }
+
+    const amount = Number(settlement.amount || 0);
+    if (amount <= 0)
+      throw new BadRequestException(
+        'Settlement amount must be greater than zero.',
+      );
+
+    const currency = await this.getSettlementCurrency(
+      tripId,
+      settlement.currency,
+    );
+    const amountInMinorUnit = this.toMinorCurrencyUnit(amount, currency);
+    const keyId = this.config.get<string>('razorpay.keyId');
+    const keySecret = this.config.get<string>('razorpay.keySecret');
+    if (!keyId || !keySecret) {
+      throw new ServiceUnavailableException('Razorpay is not configured.');
+    }
+
+    const order = await this.createRazorpayOrder({
+      amount: amountInMinorUnit,
+      currency,
+      receipt: `settlement_${settlement.id.slice(0, 24)}`,
+      notes: {
+        settlementId: settlement.id,
+        tripId,
+        fromUserId: settlement.fromUserId,
+        toUserId: settlement.toUserId,
+      },
+    });
+
+    settlement.currency = currency;
+    settlement.razorpayOrderId = order.id;
+    settlement.razorpayPaymentId = null;
+    settlement.razorpaySignature = null;
+    await settlement.save();
+
+    return {
+      amount: order.amount,
+      currency: order.currency,
+      keyId,
+      orderId: order.id,
+      settlementId: settlement.id,
+    };
+  }
+
+  async verifyRazorpaySettlementPayment(
+    tripId: string,
+    settlementId: string,
+    userId: string,
+    dto: VerifyRazorpaySettlementDto,
+  ) {
+    const settlement = await this.settlements
+      .findOne({
+        id: settlementId,
+        tripId,
+        fromUserId: userId,
+      })
+      .exec();
+    if (!settlement) {
+      throw new ForbiddenException(
+        'Only the member who owes this amount can verify this payment.',
+      );
+    }
+    if (settlement.status === SETTLEMENT_STATUSES.PAID) return settlement;
+    if (settlement.razorpayOrderId !== dto.razorpayOrderId) {
+      throw new BadRequestException(
+        'Payment order does not match this settlement.',
+      );
+    }
+    if (!this.isValidRazorpaySignature(dto)) {
+      throw new BadRequestException('Invalid Razorpay payment signature.');
+    }
+
+    settlement.status = SETTLEMENT_STATUSES.PAID;
+    settlement.razorpayPaymentId = dto.razorpayPaymentId;
+    settlement.razorpaySignature = dto.razorpaySignature;
+    settlement.paidAt = new Date();
+    await settlement.save();
+    await this.notifications.createForUser(settlement.toUserId, {
+      tripId,
+      type: 'settlement_payment_confirmed',
+      title: 'Settlement paid with Razorpay',
+      body: `A settlement payment of ${settlement.amount} was verified.`,
+      resourceType: 'settlement',
+      resourceId: settlement.id,
+    });
     return settlement;
   }
 
@@ -197,7 +391,10 @@ export class ExpensesService {
     );
     const balances = new Map<string, number>();
     const addBalance = (userId: string, amount: number) => {
-      balances.set(userId, Number(((balances.get(userId) ?? 0) + amount).toFixed(2)));
+      balances.set(
+        userId,
+        Number(((balances.get(userId) ?? 0) + amount).toFixed(2)),
+      );
     };
 
     expenses.forEach((expense) => {
@@ -218,21 +415,26 @@ export class ExpensesService {
       .sort((a, b) => b.amount - a.amount);
     const settlements: Array<{
       amount: number;
+      currency: string;
       fromUserId: string;
       toUserId: string;
       tripId: string;
     }> = [];
+    const settlementCurrency = await this.getSettlementCurrency(tripId);
     let debtorIndex = 0;
     let creditorIndex = 0;
 
     while (debtorIndex < debtors.length && creditorIndex < creditors.length) {
       const debtor = debtors[debtorIndex];
       const creditor = creditors[creditorIndex];
-      const amount = Number(Math.min(debtor.amount, creditor.amount).toFixed(2));
+      const amount = Number(
+        Math.min(debtor.amount, creditor.amount).toFixed(2),
+      );
 
       if (amount > 0) {
         settlements.push({
           amount,
+          currency: settlementCurrency,
           fromUserId: debtor.userId,
           toUserId: creditor.userId,
           tripId,
@@ -304,5 +506,66 @@ export class ExpensesService {
         createdAt: 1,
       },
     };
+  }
+
+  private async createRazorpayOrder(payload: {
+    amount: number;
+    currency: string;
+    notes: Record<string, string>;
+    receipt: string;
+  }) {
+    const keyId = this.config.getOrThrow<string>('razorpay.keyId');
+    const keySecret = this.config.getOrThrow<string>('razorpay.keySecret');
+    const auth = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+    const response = await fetch('https://api.razorpay.com/v1/orders', {
+      body: JSON.stringify({
+        amount: payload.amount,
+        currency: payload.currency,
+        notes: payload.notes,
+        receipt: payload.receipt,
+      }),
+      headers: {
+        Authorization: `Basic ${auth}`,
+        'Content-Type': 'application/json',
+      },
+      method: 'POST',
+    });
+
+    if (!response.ok) {
+      throw new BadRequestException('Unable to create Razorpay order.');
+    }
+
+    return (await response.json()) as RazorpayOrderResponse;
+  }
+
+  private async getSettlementCurrency(
+    tripId: string,
+    currentCurrency?: string | null,
+  ) {
+    if (currentCurrency) return currentCurrency.toUpperCase();
+
+    const trip = await this.trips.findOne({ id: tripId }).lean().exec();
+    return (trip?.currency || 'INR').toUpperCase();
+  }
+
+  private isValidRazorpaySignature(dto: VerifyRazorpaySettlementDto) {
+    const keySecret = this.config.getOrThrow<string>('razorpay.keySecret');
+    const expected = createHmac('sha256', keySecret)
+      .update(`${dto.razorpayOrderId}|${dto.razorpayPaymentId}`)
+      .digest('hex');
+
+    const expectedBuffer = Buffer.from(expected);
+    const receivedBuffer = Buffer.from(dto.razorpaySignature);
+    return (
+      expectedBuffer.length === receivedBuffer.length &&
+      timingSafeEqual(expectedBuffer, receivedBuffer)
+    );
+  }
+
+  private toMinorCurrencyUnit(amount: number, currency: string) {
+    const zeroDecimalCurrencies = new Set(['JPY']);
+    return Math.round(
+      amount * (zeroDecimalCurrencies.has(currency.toUpperCase()) ? 1 : 100),
+    );
   }
 }

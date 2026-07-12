@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -68,3 +69,19 @@ export class CreateExpenseDto {
 }
 
 export class UpdateExpenseDto extends PartialType(CreateExpenseDto) {}
+
+export class VerifyRazorpaySettlementDto {
+  @ApiProperty({ example: 'order_Q0abc123xyz' })
+  @IsString()
+  @Matches(/^order_[A-Za-z0-9]+$/)
+  razorpayOrderId: string;
+
+  @ApiProperty({ example: 'pay_Q0abc123xyz' })
+  @IsString()
+  @Matches(/^pay_[A-Za-z0-9]+$/)
+  razorpayPaymentId: string;
+
+  @ApiProperty({ example: '9ef4a2d0f4d2f0a...' })
+  @IsString()
+  razorpaySignature: string;
+}

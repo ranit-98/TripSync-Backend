@@ -72,12 +72,27 @@ export class Settlement implements BaseDocument {
   @Prop({ required: true, min: 0 })
   amount: number;
 
+  @Prop({ default: 'USD', uppercase: true, trim: true })
+  currency: string;
+
   @Prop({
     type: String,
     enum: Object.values(SETTLEMENT_STATUSES),
     default: SETTLEMENT_STATUSES.PENDING,
   })
   status: string;
+
+  @Prop({ type: String, default: null })
+  razorpayOrderId: string | null;
+
+  @Prop({ type: String, default: null })
+  razorpayPaymentId: string | null;
+
+  @Prop({ type: String, default: null })
+  razorpaySignature: string | null;
+
+  @Prop({ type: Date, default: null })
+  paidAt: Date | null;
 
   updatedAt: Date;
 }

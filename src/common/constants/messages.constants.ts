@@ -49,6 +49,8 @@ export const MESSAGES = {
     SETTLEMENTS: 'Settlement summary fetched successfully',
     SETTLED: 'Settlement marked as paid',
     REMINDER_SENT: 'Settlement reminders queued successfully',
+    PAYMENT_ORDER_CREATED: 'Razorpay settlement order created successfully',
+    PAYMENT_VERIFIED: 'Settlement payment verified successfully',
   },
   MAP: {
     LISTED: 'Locations fetched successfully',

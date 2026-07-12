@@ -68,4 +68,7 @@ export type DocumentDocument = HydratedDocument<Document>;
 export const DocumentFolderSchema =
   SchemaFactory.createForClass(DocumentFolder);
 export const DocumentSchema = SchemaFactory.createForClass(Document);
-DocumentFolderSchema.index({ tripId: 1, parentId: 1, name: 1 }, { unique: true });
+DocumentFolderSchema.index(
+  { tripId: 1, parentId: 1, name: 1 },
+  { unique: true },
+);
