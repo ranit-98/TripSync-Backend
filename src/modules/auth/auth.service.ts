@@ -48,11 +48,21 @@ export class AuthService {
       throw new ConflictException(MESSAGES.AUTH.EMAIL_EXISTS);
     }
 
-    const user = await this.users.create({
-      name: dto.name,
-      email,
-      passwordHash: await bcrypt.hash(dto.password, 12),
-    });
+    let user: UserDocument;
+    try {
+      user = await this.users.create({
+        name: dto.name,
+        email,
+        passwordHash: await bcrypt.hash(dto.password, 12),
+      });
+    } catch (error: unknown) {
+      // The exists check gives a quick response, while the unique index is the
+      // final protection when two registrations race each other in production.
+      if (this.isDuplicateEmailError(error)) {
+        throw new ConflictException(MESSAGES.AUTH.EMAIL_EXISTS);
+      }
+      throw error;
+    }
 
     const tokens = await this.issueTokens(user);
     await this.persistRefreshToken(String(user.id), tokens.refreshToken);
@@ -129,6 +139,19 @@ export class AuthService {
         { refreshTokenHash: await bcrypt.hash(token, 12) },
       )
       .exec();
+  }
+
+  private isDuplicateEmailError(error: unknown) {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 11000 &&
+      'keyPattern' in error &&
+      typeof error.keyPattern === 'object' &&
+      error.keyPattern !== null &&
+      'email' in error.keyPattern
+    );
   }
 
   toProfile(user: User | UserDocument) {

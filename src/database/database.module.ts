@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
+import { DatabaseIndexMigrationService } from './database-index-migration.service';
 import { mongoModelDefinitions } from './schema.definitions';
 
 @Global()
@@ -14,6 +15,7 @@ import { mongoModelDefinitions } from './schema.definitions';
     }),
     MongooseModule.forFeature(mongoModelDefinitions),
   ],
+  providers: [DatabaseIndexMigrationService],
   exports: [MongooseModule],
 })
 export class DatabaseModule {}
