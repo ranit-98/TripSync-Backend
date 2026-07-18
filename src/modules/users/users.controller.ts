@@ -16,8 +16,8 @@ import { MESSAGES } from '../../common/constants/messages.constants';
 import type { RequestUser } from '../../common/types/request-user.type';
 import { UploadsService } from '../uploads/uploads.service';
 import { ChangePasswordDto, UpdateUserDto } from './dto/update-user.dto';
+import { UserSearchQueryDto } from './dto/user-search-query.dto';
 import { UsersService } from './users.service';
-import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard)
@@ -28,8 +28,11 @@ export class UsersController {
   ) {}
 
   @Get('search')
-  async search(@CurrentUser() user: RequestUser, @Query('q') search = '', @Query() query: PaginationQueryDto) {
-    const result = await this.users.search(search, user.id, query);
+  async search(
+    @CurrentUser() user: RequestUser,
+    @Query() query: UserSearchQueryDto,
+  ) {
+    const result = await this.users.search(query.q, user.id, query);
     return { data: result.items, pagination: result.pagination };
   }
 
@@ -50,10 +53,7 @@ export class UsersController {
 
   @Patch('me')
   @ApiBody({ type: UpdateUserDto })
-  async updateMe(
-    @CurrentUser() user: RequestUser,
-    @Body() dto: UpdateUserDto,
-  ) {
+  async updateMe(@CurrentUser() user: RequestUser, @Body() dto: UpdateUserDto) {
     return {
       message: MESSAGES.USERS.UPDATED,
       data: await this.users.updateProfile(user.id, dto),
