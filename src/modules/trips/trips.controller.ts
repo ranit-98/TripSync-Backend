@@ -241,6 +241,16 @@ export class TripsController {
     };
   }
 
+  @Delete('trips/:tripId/members/me')
+  @UseGuards(TripMemberGuard)
+  async leaveTrip(
+    @Param('tripId') tripId: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    await this.trips.leaveTrip(tripId, user.id);
+    return { message: 'Left trip successfully' };
+  }
+
   @Delete('trips/:tripId/members/:memberId')
   @UseGuards(TripOwnerOrAdminGuard)
   async removeMember(@Param('memberId') memberId: string) {

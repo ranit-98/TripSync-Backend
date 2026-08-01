@@ -8,9 +8,16 @@ import { Model, PipelineStage } from 'mongoose';
 import { MESSAGES } from '../../common/constants/messages.constants';
 import {
   INVITE_STATUSES,
+  SETTLEMENT_STATUSES,
   TRIP_MEMBER_ROLES,
 } from '../../common/constants/roles.constants';
-import { Trip, TripInvite, TripMember, User } from '../../database/schemas';
+import {
+  Settlement,
+  Trip,
+  TripInvite,
+  TripMember,
+  User,
+} from '../../database/schemas';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
   PaginationQueryDto,
@@ -56,6 +63,8 @@ export class TripsService {
     private readonly tripMembers: Model<TripMember>,
     @InjectModel(TripInvite.name)
     private readonly tripInvites: Model<TripInvite>,
+    @InjectModel(Settlement.name)
+    private readonly settlements: Model<Settlement>,
     @InjectModel(User.name) private readonly users: Model<User>,
     private readonly notifications: NotificationsService,
   ) {}
@@ -292,6 +301,40 @@ export class TripsService {
 
   async removeMember(memberId: string) {
     await this.tripMembers.deleteOne({ id: memberId }).exec();
+  }
+
+  async leaveTrip(tripId: string, userId: string) {
+    const trip = await this.trips.findOne({ id: tripId }).lean().exec();
+    if (!trip) throw new NotFoundException(MESSAGES.COMMON.NOT_FOUND);
+
+    if (trip.ownerId === userId) {
+      throw new BadRequestException(
+        'Trip owner cannot leave the trip. Delete the trip instead.',
+      );
+    }
+
+    const member = await this.tripMembers
+      .findOne({ tripId, userId })
+      .lean()
+      .exec();
+    if (!member) throw new NotFoundException(MESSAGES.COMMON.NOT_FOUND);
+
+    const hasPendingSettlement = await this.settlements
+      .exists({
+        tripId,
+        status: { $ne: SETTLEMENT_STATUSES.PAID },
+        amount: { $gt: 0.005 },
+        $or: [{ fromUserId: userId }, { toUserId: userId }],
+      })
+      .exec();
+
+    if (hasPendingSettlement) {
+      throw new BadRequestException(
+        'Settle all pending payments before leaving this trip.',
+      );
+    }
+
+    await this.tripMembers.deleteOne({ id: member.id }).exec();
   }
 
   async acceptInvite(inviteId: string, userId: string, userEmail: string) {

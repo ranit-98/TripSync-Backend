@@ -30,7 +30,10 @@ export class ChatController {
   ) {}
 
   @Get()
-  async history(@Param('tripId') tripId: string, @Query() query: PaginationQueryDto) {
+  async history(
+    @Param('tripId') tripId: string,
+    @Query() query: PaginationQueryDto,
+  ) {
     const result = await this.chat.history(tripId, query);
     return {
       message: MESSAGES.CHAT.HISTORY,
@@ -40,7 +43,7 @@ export class ChatController {
   }
 
   @Post()
-  @TripRoles(TRIP_MEMBER_ROLES.COLLABORATOR)
+  @TripRoles(TRIP_MEMBER_ROLES.COLLABORATOR, TRIP_MEMBER_ROLES.VIEWER)
   @ApiBody({ type: CreateMessageDto })
   async send(
     @Param('tripId') tripId: string,
@@ -57,7 +60,7 @@ export class ChatController {
   }
 
   @Post(':messageId/attachments')
-  @TripRoles(TRIP_MEMBER_ROLES.COLLABORATOR)
+  @TripRoles(TRIP_MEMBER_ROLES.COLLABORATOR, TRIP_MEMBER_ROLES.VIEWER)
   @ApiBody({ type: CreateAttachmentDto })
   async attach(
     @Param('messageId') messageId: string,
